@@ -83,7 +83,7 @@ Check out the available combinations of `action` and `actionType`:
 | ORDERS    | null                  | Get current open orders      |
 | HISTORY   | DATA                  | Get data history             |
 | HISTORY   | TRADES                | Get trades history           |
-| HISTORY   | WRITE                 | Downlaod history data as CSV |
+| HISTORY   | WRITE                 | Download history data as CSV |
 | TRADE     | ORDER_TYPE_BUY        | Buy market                   |
 | TRADE     | ORDER_TYPE_SELL       | Sell market                  |
 | TRADE     | ORDER_TYPE_BUY_LIMIT  | Buy limit                    |
