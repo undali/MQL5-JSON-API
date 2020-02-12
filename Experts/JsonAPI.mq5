@@ -98,22 +98,23 @@ int OnInit(){
     EventSetMillisecondTimer(1);
 
     int bindSocketsDelay = 65; // Seconds to wait if binding of sockets fails.
-    int bindAttemtps = 3; // Number of binding attemtps 
+  
     bool result = false;
-      
     Print("Binding sockets...");
-      
-    for(int i=0;i<bindAttemtps;i++){
-      result = BindSockets();
-      if (BindSockets()) return(INIT_SUCCEEDED);
-      else {
-         Print("Binding sockets failed. Waiting ", bindSocketsDelay, " seconds to try again...");
-         Sleep(bindSocketsDelay*1000);
-         }     
-      } 
+    result = BindSockets();
+    if (result==false){
+      // Print("Binding of sockets failed permanently.");
+       Print("Binding sockets failed. Waiting ", bindSocketsDelay, " seconds to try again...");
+       Sleep(bindSocketsDelay*1000);
+       result = BindSockets();
+       if (result==false){
+        Print("Binding of sockets failed permanently.");
+        return(INIT_FAILED);
+      }
     }
-  Print("Binding of sockets failed permanently.");
-  return(INIT_FAILED);
+  }
+
+  return(INIT_SUCCEEDED);
 }
 
 /*
