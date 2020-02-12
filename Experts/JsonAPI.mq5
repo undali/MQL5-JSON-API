@@ -105,15 +105,15 @@ int OnInit(){
       
     for(int i=0;i<bindAttemtps;i++){
       result = BindSockets();
-      if (result) return(INIT_SUCCEEDED);
+      if (BindSockets()) return(INIT_SUCCEEDED);
       else {
          Print("Binding sockets failed. Waiting ", bindSocketsDelay, " seconds to try again...");
          Sleep(bindSocketsDelay*1000);
          }     
-      }
-      
-    Print("Binding of sockets failed permanently.");
-    return(INIT_FAILED);
+      } 
+    }
+  Print("Binding of sockets failed permanently.");
+  return(INIT_FAILED);
 }
 
 /*
