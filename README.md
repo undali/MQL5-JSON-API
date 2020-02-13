@@ -24,7 +24,7 @@ This project was developed to work as a server for the Backtrader Python trading
 
 Backtrader Python client is located here: [Python Backtrader - Metaquotes MQL5 ](https://github.com/khramkov/Backtrader-MQL5-API)
 
-Thanks to the participation of [freedumb2000] (https://github.com/freedumb2000), the project moved to a new level.
+Thanks to the participation of [freedumb2000](https://github.com/freedumb2000), the project moved to a new level.
 
 New features:
 
