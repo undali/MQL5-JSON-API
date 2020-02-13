@@ -1,12 +1,12 @@
 # Metaquotes MQL5 - JSON - API
 
-### Development state: first stable release
+### Development state: stable release version 2.0
 
 Tested on macOS Mojave / Windows 10 in Parallels Desktop container.
 
 Working in production on Debian 10 / Wine 4.
 
-An issue was found because of REP/REQ socket. Architecture changes are in development.
+
 
 ## Table of Contents
 
@@ -23,6 +23,16 @@ An issue was found because of REP/REQ socket. Architecture changes are in develo
 This project was developed to work as a server for the Backtrader Python trading framework. It is based on ZeroMQ sockets and uses JSON format to communicate. But now it has grown to the independent project. You can use it with any programming language that has [ZeroMQ binding](http://zeromq.org/bindings:_start).
 
 Backtrader Python client is located here: [Python Backtrader - Metaquotes MQL5 ](https://github.com/khramkov/Backtrader-MQL5-API)
+
+Thanks to the participation of [freedumb2000] (https://github.com/freedumb2000), the project moved to a new level.
+
+New features:
+
+- support for multiple datastreams in parallel for any combination of symbols and timeframes independently of the timeframe and symbol of the attached chart
+- support for tick data
+- support for direct download as CSV files
+- automatic retry binding to sockets. When running under Wine in Linux, sockets will be blocked for 60 seconds if closed uncleanly. This can happen if the client is still connected while the EA gets reloaded.
+skip re-initialization on chart timeframe change
 
 In development:
 
@@ -77,6 +87,7 @@ Check out the available combinations of `action` and `actionType`:
 | action    | actionType            | Description                  |
 | --------- | --------------------- | ---------------------------- |
 | CONFIG    | null                  | Set script configuration     |
+| RESET     | null                  | Reset subscribed symbols     |
 | ACCOUNT   | null                  | Get account settings         |
 | BALANCE   | null                  | Get current balance          |
 | POSITIONS | null                  | Get current open positions   |
@@ -215,12 +226,26 @@ All examples will be on Python 3. Lets create an instance of MetaTrader API clas
 api = MTraderAPI()
 ```
 
-First of all we should configure the script `symbol` and `timeframe`. Live data stream will be configured to the same params.
+First of all we should configure the script `symbol` and `timeframe`. Live data stream will be configured to the same params. You can use any number of `symbols` and `timeframes`. The server will subscribe to these symbols and translate them to `Live data` socket. 
 
 ```python
-rep = api.construct_and_send(action="CONFIG", symbol="EURUSD", chartTF="M5")
-print(rep)
+print(api.construct_and_send(action="CONFIG", symbol="EURUSD", chartTF="M5"))
+print(api.construct_and_send(action="CONFIG", symbol="AUDUSD", chartTF="M1"))
+...
 ```
+There is also `tick` data. You can subscribe for `tick` and `candle` data at the same `symbol`.
+
+```python
+print(api.construct_and_send(action="CONFIG", symbol="EURUSD", chartTF="TICK"))
+print(api.construct_and_send(action="CONFIG", symbol="EURUSD", chartTF="M1"))
+```
+
+If you want to stop `Live data`, you should reset server subscriptions. 
+
+```python
+rep = api.construct_and_send(action="RESET")
+print(rep)
+``` 
 
 Get information about the trading account.
 
@@ -315,10 +340,11 @@ while True:
     pass
 ```
 
-There are only two variants of `Live socket` data. When everything is ok, the script sends data on candle close:
+There are only two variants of `Live socket` data. When everything is ok, the script sends subscribed data on new even. You can divide streams by symbol and timeframe names:
 
 ```
-{"status":"CONNECTED","data":[1560780120,1.12186,1.12194,1.12186,1.12191,15.00000]}
+{"status":"CONNECTED","symbol":"EURUSD","timeframe":"TICK","data":[1581611172734,1.08515,1.08521]}
+{"status":"CONNECTED","symbol":"EURUSD","timeframe":"M1","data":[1581611100,1.08525,1.08525,1.08520,1.08520,10.00000]}
 ```
 
 If the terminal has lost connection to the market:

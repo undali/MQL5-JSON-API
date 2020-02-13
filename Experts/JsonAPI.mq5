@@ -98,20 +98,20 @@ int OnInit(){
     EventSetMillisecondTimer(1);
 
     int bindSocketsDelay = 65; // Seconds to wait if binding of sockets fails.
-  
-    bool result = false;
+    int bindAttemtps = 2; // Number of binding attemtps 
+   
     Print("Binding sockets...");
-    result = BindSockets();
-    if (result==false){
-      // Print("Binding of sockets failed permanently.");
-       Print("Binding sockets failed. Waiting ", bindSocketsDelay, " seconds to try again...");
-       Sleep(bindSocketsDelay*1000);
-       result = BindSockets();
-       if (result==false){
-        Print("Binding of sockets failed permanently.");
-        return(INIT_FAILED);
-      }
+   
+    for(int i=0;i<bindAttemtps+1;i++){
+      if (BindSockets()) return(INIT_SUCCEEDED);
+      else {
+         Print("Binding sockets failed. Waiting ", bindSocketsDelay, " seconds to try again...");
+         Sleep(bindSocketsDelay*1000);
+      }     
     }
+    
+    Print("Binding of sockets failed permanently.");
+    return(INIT_FAILED);
   }
 
   return(INIT_SUCCEEDED);
@@ -679,23 +679,18 @@ void GetOrders(CJAVal &dataObject){
 //| Clear symbol subscriptions                                       |
 //+------------------------------------------------------------------+
 
-void ResetSubscriptions(CJAVal &dataObject)
-  {
-    bool retVal = true;
-    
-    ArrayFree(chartSymbols);
-    chartSymbolCount=0;
-    ArrayFree(chartSymbolSettings);
- 
-    if(!ArraySize(chartSymbols)) retVal=false;
-    if(!ArraySize(chartSymbolSettings)) retVal=false;  
+void ResetSubscriptions(CJAVal &dataObject){
 
-    if (retVal==false){
-      // TODO Implement propery error codes and descriptions
-      ActionDoneOrError(65540,  __FUNCTION__);
-    }
-    else ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
-  }
+   ArrayFree(chartSymbols);
+   chartSymbolCount=0;
+   ArrayFree(chartSymbolSettings);
+   
+   if(ArraySize(chartSymbols)!=0 ||ArraySize(chartSymbolSettings)!=0){
+   // TODO Implement propery error codes and descriptions
+   ActionDoneOrError(65540,  __FUNCTION__);
+   }
+   else ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
+}
   
 //+------------------------------------------------------------------+
 //| Trading module                                                   |
