@@ -36,6 +36,7 @@ int SYS_PORT=15555;
 int DATA_PORT=15556;
 int LIVE_PORT=15557;
 int STR_PORT=15558;
+int IND_DATA_PORT=15559;
 
 // ZeroMQ Cnnections
 Context context("MQL5 JSON API");
@@ -43,6 +44,7 @@ Socket sysSocket(context,ZMQ_REP);
 Socket dataSocket(context,ZMQ_PUSH);
 Socket liveSocket(context,ZMQ_PUSH);
 Socket streamSocket(context,ZMQ_PUSH);
+Socket indicatorDataSocket(context,ZMQ_PUSH);
 
 // Global variables
 bool debug = false;
@@ -52,6 +54,10 @@ int deInitReason = -1;
 string chartSymbols[];
 int chartSymbolCount = 0;
 string chartSymbolSettings[][3];
+
+int indicatorCount = 0;
+double indicators[];
+string indicatorIds[];
 
 //+------------------------------------------------------------------+
 //| Bind ZMQ sockets to ports                                        |
@@ -66,22 +72,27 @@ bool BindSockets(){
   if (result == false) return result;
   result = streamSocket.bind(StringFormat("tcp://%s:%d", HOST,STR_PORT));
   if (result == false) return result;
+  result = indicatorDataSocket.bind(StringFormat("tcp://%s:%d", HOST,IND_DATA_PORT));
+  if (result == false) return result;
   
   Print("Bound 'System' socket on port ", SYS_PORT);
   Print("Bound 'Data' socket on port ", DATA_PORT);
   Print("Bound 'Live' socket on port ", LIVE_PORT);
   Print("Bound 'Streaming' socket on port ", STR_PORT);
+  Print("Bound 'Indicator Data' socket on port ", IND_DATA_PORT);
     
   sysSocket.setLinger(1000);
   dataSocket.setLinger(1000);
   liveSocket.setLinger(1000);
   streamSocket.setLinger(1000);
+  indicatorDataSocket.setLinger(1000);
     
   // Number of messages to buffer in RAM.
   sysSocket.setSendHighWaterMark(1);
   dataSocket.setSendHighWaterMark(5);
   liveSocket.setSendHighWaterMark(1);
   streamSocket.setSendHighWaterMark(50);
+  indicatorDataSocket.setSendHighWaterMark(5);
 
   return result;
 }
@@ -159,15 +170,29 @@ void OnTick(){
 //+------------------------------------------------------------------+
 //| Check if subscribed to symbol and timeframe combination                                 |
 //+------------------------------------------------------------------+
-bool hasChartSymbol(string symbol, string chartTF)
+bool HasChartSymbol(string symbol, string chartTF)
   {
      for(int i=0;i<ArraySize(chartSymbols);i++)
      {
-      if(chartSymbolSettings[i][0] == symbol && chartSymbolSettings[i][1] == chartTF ){
+      if(chartSymbolSettings[i][0] == symbol && chartSymbolSettings[i][1] == chartTF){
           return true;
       }
      }
      return false;
+  }
+
+//+------------------------------------------------------------------+
+//| Get index of indicator handler array by indicator id string      |
+//+------------------------------------------------------------------+
+int GetIndicatorIdxByIndicatorId(string indicatorId)
+  {
+     for(int i=0;i<indicatorCount;i++)
+     {
+      if(indicatorIds[i] == indicatorId){
+          return i;
+      }
+     }
+     return -1;
   }
 
 //+------------------------------------------------------------------+
@@ -264,6 +289,7 @@ void OnTimer(){
 
 }
 
+/*
 //+------------------------------------------------------------------+
 //| ChartEvent function                                              |
 //| This function must be declared, even if it empty.                |
@@ -277,6 +303,7 @@ void OnChartEvent(const int id,         // event id
   {
    //--- Add your code here...
   }
+*/
 
 //+------------------------------------------------------------------+
 //| Request handler                                                  |
@@ -304,14 +331,15 @@ void RequestHandler(ZmqMsg &request){
   // Process action command
   string action = message["action"].ToStr();
   
-  if(action=="CONFIG")          {ScriptConfiguration(message);}
-  else if(action=="ACCOUNT")    {GetAccountInfo();}
-  else if(action=="BALANCE")    {GetBalanceInfo();}
-  else if(action=="HISTORY")    {HistoryInfo(message);}
-  else if(action=="TRADE")      {TradingModule(message);}
-  else if(action=="POSITIONS")  {GetPositions(message);}
-  else if(action=="ORDERS")     {GetOrders(message);}
-  else if(action=="RESET")      {ResetSubscriptions(message);}
+  if(action=="CONFIG")          ScriptConfiguration(message);
+  else if(action=="ACCOUNT")    GetAccountInfo();
+  else if(action=="BALANCE")    GetBalanceInfo();
+  else if(action=="HISTORY")    HistoryInfo(message);
+  else if(action=="TRADE")      TradingModule(message);
+  else if(action=="POSITIONS")  GetPositions(message);
+  else if(action=="ORDERS")     GetOrders(message);
+  else if(action=="RESET")      ResetSubscriptionsAndIndicators();
+  else if(action=="INDICATOR")  StartIndicator(message);
   // Action command error processing
   else ActionDoneOrError(65538, __FUNCTION__);
    
@@ -329,7 +357,7 @@ void ScriptConfiguration(CJAVal &dataObject){
   string symbArr[1];
   symbArr[0]= symbol;
   
-  if (!hasChartSymbol(symbol, chartTF)) {
+  if (!HasChartSymbol(symbol, chartTF)) {
     ArrayInsert(chartSymbols,symbArr,0);
     ArrayResize(chartSymbolSettings,chartSymbolCount+1);
     chartSymbolSettings[chartSymbolCount][0]=symbol;
@@ -344,6 +372,116 @@ void ScriptConfiguration(CJAVal &dataObject){
   }
   else ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
 
+}
+
+//+------------------------------------------------------------------+
+//| Start new indicator instance                                     |
+//+------------------------------------------------------------------+
+void StartIndicator(CJAVal &dataObject){
+  
+  string symbol=dataObject["symbol"].ToStr();
+  string chartTF=dataObject["chartTF"].ToStr();
+  string id=dataObject["id"].ToStr();
+  string indicatorName=dataObject["indicatorName"].ToStr();
+  
+  indicatorCount++;  
+  ArrayResize(indicators,indicatorCount);
+  ArrayResize(indicatorIds,indicatorCount);
+  int idx = indicatorCount-1;
+  indicatorIds[idx] = id;
+  
+  double params[];
+  int paramsCount = dataObject["indicatorParams"].Size();
+  for(int i=0;i<paramsCount;i++){
+    ArrayResize(params, i+1);
+    params[i] = dataObject["indicatorParams"][i].ToDbl();
+  }
+  
+  // Case construct for passing variable parameter count to the iCustom function is used, because MQL5 does not seem to support expanding an array to a function parameter list
+  switch(paramsCount)
+    {
+     case 0:
+        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName);
+        break;
+     case 1:
+        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[0]);
+        break;
+     case 2:
+        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2]);
+        break;
+     case 3:
+        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3]);
+        break;
+     case 4:
+        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4]);
+        break;
+     case 5:
+        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4], params[5]);
+        break;
+     case 6:
+        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4], params[5], params[6]);
+        break;
+     case 7:
+        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4], params[5], params[6], params[7]);
+        break;
+     case 8:
+        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8]);
+        break;
+     case 9:
+        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8], params[9]);
+        break;
+     case 10:
+        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8], params[9], params[10]);
+        break;
+     default:
+        // TODO error handling
+        break;
+    }
+ 
+  GetIndicatorResult(dataObject);
+  
+  // TODO more error handling
+  if(SymbolInfoInteger(symbol, SYMBOL_EXIST)){  
+    ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
+  }
+  else ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
+}
+
+//+------------------------------------------------------------------+
+//| Get indicator results                                           |
+//+------------------------------------------------------------------+
+void GetIndicatorResult(CJAVal &dataObject) {
+   
+  datetime fromDate=StringToTime(dataObject["fromDate"].ToStr());
+  string id=dataObject["id"].ToStr();
+  string indicatorName=dataObject["indicatorName"].ToStr();
+  
+  int idx = GetIndicatorIdxByIndicatorId(id);
+  
+  double values[10];
+  CJAVal results[10];
+
+    for(int i=0;i<10;i++){
+      values[i] = 0.0;
+      results[i] = 0.0;
+      if(idx >= 0) {
+        if(CopyBuffer(indicators[idx], i, fromDate, 1, values) < 0) values[0] = 0.0;
+        results[i] = DoubleToString(values[0]);
+      }
+      else {
+        // TODO error handling
+      }
+    }
+
+  if (liveStream) {
+    CJAVal data;
+    data["id"] = (string) id;
+    data["data"].Set(results);
+              
+    string t=data.Serialize();
+    if(debug) Print(t);
+    InformClientSocket(indicatorDataSocket,t);
+  }
 }
 
 //+------------------------------------------------------------------+
@@ -709,18 +847,26 @@ void GetOrders(CJAVal &dataObject){
 }
 
 //+------------------------------------------------------------------+
-//| Clear symbol subscriptions                                       |
+//| Clear symbol subscriptions and indicators                        |
 //+------------------------------------------------------------------+
 
-void ResetSubscriptions(CJAVal &dataObject){
+void ResetSubscriptionsAndIndicators(){
 
    ArrayFree(chartSymbols);
-   chartSymbolCount=0;
    ArrayFree(chartSymbolSettings);
+   chartSymbolCount=0;
    
-   if(ArraySize(chartSymbols)!=0 ||ArraySize(chartSymbolSettings)!=0){
+   bool error = false;
+   for(int i=0;i<chartSymbolCount;i++){
+    if(!IndicatorRelease(indicators[i])) error = true;
+   }
+   ArrayFree(indicators);
+   ArrayFree(indicatorIds);
+   indicatorCount = 0;
+   
+   if(ArraySize(chartSymbols)!=0 || ArraySize(chartSymbolSettings)!=0 || ArraySize(indicators)!=0 || ArraySize(indicatorIds)!=0 || error){
    // TODO Implement propery error codes and descriptions
-   ActionDoneOrError(65540,  __FUNCTION__);
+   ActionDoneOrError(GetLastError(),  __FUNCTION__);
    }
    else ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
 }
@@ -1045,7 +1191,7 @@ string GetErrorID(int error){
     case 65537: return("ERR_DESERIALIZATION");                break;
     case 65538: return("ERR_WRONG_ACTION");                   break;
     case 65539: return("ERR_WRONG_ACTION_TYPE");              break;
-    case 65540: return("ERR_CLEAR_SUBSCRIPTIONS_FAILED");     break;
+    //case 65540: return("ERR_CLEAR_SUBSCRIPTIONS_FAILED");     break;
     case 65541: return("ERR_RETRIEVE_DATA_FAILED");     break;
     case 65542: return("ERR_CFILE_CREATION_FAILED");     break;
     
