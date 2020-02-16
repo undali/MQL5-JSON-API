@@ -6,8 +6,6 @@ Tested on macOS Mojave / Windows 10 in Parallels Desktop container.
 
 Working in production on Debian 10 / Wine 4.
 
-
-
 ## Table of Contents
 
 - [About the Project](#about-the-project)
@@ -28,11 +26,11 @@ Thanks to the participation of [freedumb2000](https://github.com/freedumb2000), 
 
 New features:
 
-- support for multiple datastreams in parallel for any combination of symbols and timeframes independently of the timeframe and symbol of the attached chart
-- support for tick data
-- support for direct download as CSV files
-- automatic retry binding to sockets. When running under Wine in Linux, sockets will be blocked for 60 seconds if closed uncleanly. This can happen if the client is still connected while the EA gets reloaded.
-skip re-initialization on chart timeframe change
+- Support for multiple datastreams in parallel for any combination of symbols and timeframes independently of the timeframe and symbol of the attached chart
+- Support for tick data
+- Support for direct download as CSV files
+- Automatic retry binding to sockets. When running under Wine in Linux, sockets will be blocked for 60 seconds if closed uncleanly. This can happen if the client is still connected while the EA gets reloaded.
+- Skip re-initialization on chart timeframe change
 
 In development:
 
@@ -233,6 +231,7 @@ print(api.construct_and_send(action="CONFIG", symbol="EURUSD", chartTF="M5"))
 print(api.construct_and_send(action="CONFIG", symbol="AUDUSD", chartTF="M1"))
 ...
 ```
+
 There is also `tick` data. You can subscribe for `tick` and `candle` data at the same `symbol`.
 
 ```python
@@ -240,12 +239,12 @@ print(api.construct_and_send(action="CONFIG", symbol="EURUSD", chartTF="TICK"))
 print(api.construct_and_send(action="CONFIG", symbol="EURUSD", chartTF="M1"))
 ```
 
-If you want to stop `Live data`, you should reset server subscriptions. 
+If you want to stop `Live data`, you should reset server subscriptions.
 
 ```python
 rep = api.construct_and_send(action="RESET")
 print(rep)
-``` 
+```
 
 Get information about the trading account.
 
