@@ -226,7 +226,7 @@ All examples will be on Python 3. Lets create an instance of MetaTrader API clas
 api = MTraderAPI()
 ```
 
-First of all we should configure the script `symbol` and `timeframe`. Live data stream will be configured to the same params. You can use any number of `symbols` and `timeframes`. The server will subscribe to these symbols and translate them to `Live data` socket. 
+First of all we should configure the script `symbol` and `timeframe`. Live data stream will be configured to the same params. You can use any number of `symbols` and `timeframes`. The server subscribes to these sembols and will transmit them through the `Live data` socket
 
 ```python
 print(api.construct_and_send(action="CONFIG", symbol="EURUSD", chartTF="M5"))
