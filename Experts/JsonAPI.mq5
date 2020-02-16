@@ -215,6 +215,7 @@ void StreamPriceData(){
         datetime thisBar = 0;
         MqlTick tick;
         MqlRates rates[1];
+        int spread[1];
         
         if( chartTF == "TICK"){
           if(SymbolInfoTick(symbol,tick) !=true) { /*error processing */ };
@@ -222,6 +223,7 @@ void StreamPriceData(){
         }
         else {
           if(CopyRates(symbol,period,1,1,rates)!=1) { /*error processing */ };
+          if(CopySpread(symbol,period,1,1,spread)!=1) { /*error processing */ };
           thisBar=(datetime)rates[0].time;
         }
         if(lastBar!=thisBar){
@@ -238,6 +240,7 @@ void StreamPriceData(){
               Data[3] = (double) rates[0].low;
               Data[4] = (double) rates[0].close;
               Data[5] = (double) rates[0].tick_volume;
+              Data[6] = (int) spread[0];
             }
   
             last["status"] = (string) "CONNECTED";
@@ -612,6 +615,7 @@ void HistoryInfo(CJAVal &dataObject){
   
     CJAVal c, d;
     MqlRates r[];
+    int spread[];
     string fileName=symbol + "-" + chartTF + ".csv";  // file name
     string directoryName="Data"; // directory name
     string outputFile=directoryName+"//"+fileName;
@@ -629,6 +633,7 @@ void HistoryInfo(CJAVal &dataObject){
     if(dataObject["toDate"].ToInt()!=NULL)Print("4) Date to:"+TimeToString(toDate));
     
     barCount=CopyRates(symbol,period,fromDate,toDate,r);
+    if(CopySpread(symbol,period, fromDate, toDate, spread)!=1) { /*error processing */ }
         
     if(barCount){  
       ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
@@ -642,7 +647,7 @@ void HistoryInfo(CJAVal &dataObject){
       PrintFormat("File path: %s\\Files\\",TerminalInfoString(TERMINAL_DATA_PATH));
       //--- write the time and values of signals to the file
       for(int i=0;i<barCount;i++)
-         FileWrite(file_handle,r[i].time, ",", r[i].open, ",", r[i].high, ",", r[i].low, ",", r[i].close, ",", r[i].tick_volume);
+         FileWrite(file_handle,r[i].time, ",", r[i].open, ",", r[i].high, ",", r[i].low, ",", r[i].close, ",", r[i].tick_volume, spread[i]);
       //--- close the file
       FileClose(file_handle);
       PrintFormat("Data is written, %s file is closed", outputFile);
@@ -698,7 +703,7 @@ void HistoryInfo(CJAVal &dataObject){
   
     CJAVal c, d;
     MqlRates r[];
-    
+    int spread[];
     int barCount=0;    
     ENUM_TIMEFRAMES period=GetTimeframe(chartTF); 
     datetime fromDate=(datetime)dataObject["fromDate"].ToInt();
@@ -712,8 +717,10 @@ void HistoryInfo(CJAVal &dataObject){
       Print("3) Date from :"+TimeToString(fromDate));
       if(dataObject["toDate"].ToInt()!=NULL)Print("4) Date to:"+TimeToString(toDate));
     }
-      
+    
     barCount=CopyRates(symbol, period, fromDate, toDate, r);
+    if(CopySpread(symbol,period, fromDate, toDate, spread)!=1) { /*error processing */ }
+    
     if(barCount){
       for(int i=0;i<barCount;i++){
         c[i][0]=(long)   r[i].time;
@@ -722,6 +729,7 @@ void HistoryInfo(CJAVal &dataObject){
         c[i][3]=(double) r[i].low;
         c[i][4]=(double) r[i].close;
         c[i][5]=(double) r[i].tick_volume;
+        c[i][6]=(int) spread[i];
       }
       d["data"].Set(c);
     }
