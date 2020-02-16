@@ -117,6 +117,39 @@ int OnInit(){
   return(INIT_SUCCEEDED);
 }
 
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason){
+  /* Unbinding ZMQ ports on denit */
+
+  // TODO Ports do not get freed immediately under Wine. How to properly close ports? There is a timeout of about 60 sec.
+  // https://forum.winehq.org/viewtopic.php?t=22758
+  // https://github.com/zeromq/cppzmq/issues/139
+  
+  deInitReason = reason;
+  
+  // Skip reloading of the EA script when the reason to reload is a chart timeframe change
+  if (reason != REASON_CHARTCHANGE){
+      Print(__FUNCTION__," Deinitialization reason: ", getUninitReasonText(reason));
+      
+      Print("Unbinding 'System' socket on port ", SYS_PORT,"..");
+      sysSocket.unbind(StringFormat("tcp://%s:%d", HOST,SYS_PORT));
+      Print("Unbinding 'Data' socket on port ", DATA_PORT,"..");
+      dataSocket.unbind(StringFormat("tcp://%s:%d", HOST,DATA_PORT));
+      Print("Unbinding 'Live' socket on port ", LIVE_PORT, "..");
+      liveSocket.unbind(StringFormat("tcp://%s:%d", HOST,LIVE_PORT));
+      Print("Unbinding 'Streaming' socket on port ", STR_PORT, "..");
+      streamSocket.unbind(StringFormat("tcp://%s:%d", HOST,STR_PORT));
+      
+      // Shutdown ZeroMQ Context
+      context.shutdown();
+      context.destroy(0);
+      
+      EventKillTimer();
+  }
+}
+
 /*
 void OnTick(){
  
