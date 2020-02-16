@@ -102,7 +102,7 @@ int OnInit(){
    
     Print("Binding sockets...");
    
-    for(int i=0;i<bindAttemtps+1;i++){
+    for(int i=0;i<bindAttemtps;i++){
       if (BindSockets()) return(INIT_SUCCEEDED);
       else {
          Print("Binding sockets failed. Waiting ", bindSocketsDelay, " seconds to try again...");
