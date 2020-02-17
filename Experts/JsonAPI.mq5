@@ -1,4 +1,4 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //
 // Copyright (C) 2019 Nikolai Khramkov
 //
@@ -30,7 +30,9 @@
 #include <Trade/Trade.mqh>
 #include <Zmq/Zmq.mqh>
 #include <Json.mqh>
+#include <ChartObjects\ChartObject.mqh> 
 
+// Set ports and host for ZeroMQ
 string HOST="*";
 int SYS_PORT=15555;
 int DATA_PORT=15556;
@@ -51,13 +53,18 @@ bool debug = false;
 bool liveStream = true;
 bool connectedFlag= true;
 int deInitReason = -1;
+
+// Variables for handling price data stream
 string chartSymbols[];
 int chartSymbolCount = 0;
 string chartSymbolSettings[][3];
 
+// Variables for controlling indicators
 int indicatorCount = 0;
 double indicators[];
 string indicatorIds[];
+int indicatorParamCount[];
+int indicatorBufferCount[];
 
 //+------------------------------------------------------------------+
 //| Bind ZMQ sockets to ports                                        |
@@ -102,7 +109,7 @@ bool BindSockets(){
 //+------------------------------------------------------------------+
 int OnInit(){
   /* Bindinig ZMQ ports on init */
-  
+Print(GetIndicatorConstantValue("VOLUME_TICK"), " ",VOLUME_TICK);
   // Skip reloading of the EA script when the reason to reload is a chart timeframe change
   if (deInitReason != REASON_CHARTCHANGE){
   
@@ -125,9 +132,54 @@ int OnInit(){
     return(INIT_FAILED);
   }
 
+  //testDraw();
   return(INIT_SUCCEEDED);
 }
 
+void testDraw() {
+// ChartSetSymbolPeriod(ChartID(), Symbol(),PERIOD_M1);
+
+ // long chart_id;
+ //   chart_id = ChartOpen("EURUSD",PERIOD_M1);
+ // Print(chart_id);
+
+long chart_id = 0;
+  int window = 0;
+
+  datetime time1 = 1581891300;
+  double price1 = 1.08346;
+  datetime time2 = 1581891600;
+  double price2 = 1.08354;
+  chart_id = ChartOpen("EURUSD",PERIOD_M5);
+  Print(chart_id);
+  /*
+  bool CChartObjectTrend::Create(long chart_id,string name,int window,
+                                   datetime time1,double price1,datetime time2,double price2)
+  {
+   bool result=ObjectCreate(chart_id,name,OBJ_TREND,window,time1,price1,time2,price2);
+   if(result) result&=Attach(chart_id,name,window,2);
+//---
+   return(result);
+  }
+  */
+     CChartObject object;
+     //ObjectCreate(chart_id,"ellipse",OBJ_ELLIPSE,window,time1,price1,time2,price2,time2,price2+0.00005);
+     //ObjectCreate(chart_id,"ellipse",OBJ_ELLIPSE,window,time1-100,price1,time1,price1+0.00010,time1+200,price1);
+     //ObjectCreate(chart_id,"trend",OBJ_TREND,window,time1,price1,time2,price2);
+     ObjectCreate(chart_id,"reactangle",OBJ_TREND,window,time1,price1+0.00010,time2,price2+0.00020);
+
+
+   //--- attach chart object  
+   /*
+   if(!object.Attach(ChartID(),"MyObject",0,2)) 
+     { 
+      printf("Object attach error"); 
+
+     }
+    */
+   //ChartSetSymbolPeriod(ChartID(), Symbol(),PERIOD_M5);
+   ChartRedraw(chart_id);
+}
 //+------------------------------------------------------------------+
 //| Expert deinitialization function                                 |
 //+------------------------------------------------------------------+
@@ -342,7 +394,7 @@ void RequestHandler(ZmqMsg &request){
   else if(action=="POSITIONS")  GetPositions(message);
   else if(action=="ORDERS")     GetOrders(message);
   else if(action=="RESET")      ResetSubscriptionsAndIndicators();
-  else if(action=="INDICATOR")  StartIndicator(message);
+  else if(action=="INDICATOR")  IndicatorControl(message);
   // Action command error processing
   else ActionDoneOrError(65538, __FUNCTION__);
    
@@ -352,7 +404,7 @@ void RequestHandler(ZmqMsg &request){
 //| Reconfigure the script params                                    |
 //+------------------------------------------------------------------+
 void ScriptConfiguration(CJAVal &dataObject){
-  
+  //testDraw();
   string symbol=dataObject["symbol"].ToStr();
   string chartTF=dataObject["chartTF"].ToStr();
   string actionType=dataObject["actionType"].ToStr();
@@ -378,113 +430,151 @@ void ScriptConfiguration(CJAVal &dataObject){
 }
 
 //+------------------------------------------------------------------+
+//| Start new indicator or request indicator data                    |
+//+------------------------------------------------------------------+
+void IndicatorControl(CJAVal &dataObject){
+
+  string actionType=dataObject["actionType"].ToStr();
+
+  if(actionType=="REQUEST") {
+    GetIndicatorResult(dataObject);
+  }
+  else if(actionType=="START") {
+    StartIndicator(dataObject);
+  }
+  
+}
+  
+//+------------------------------------------------------------------+
 //| Start new indicator instance                                     |
 //+------------------------------------------------------------------+
 void StartIndicator(CJAVal &dataObject){
-  
+
   string symbol=dataObject["symbol"].ToStr();
   string chartTF=dataObject["chartTF"].ToStr();
   string id=dataObject["id"].ToStr();
-  string indicatorName=dataObject["indicatorName"].ToStr();
+  string indicatorName=dataObject["name"].ToStr();
   
-  indicatorCount++;  
+  indicatorCount++;    
   ArrayResize(indicators,indicatorCount);
   ArrayResize(indicatorIds,indicatorCount);
+  ArrayResize(indicatorParamCount,indicatorCount);
+  ArrayResize(indicatorBufferCount,indicatorCount);
+  
   int idx = indicatorCount-1;
+  
   indicatorIds[idx] = id;
+  indicatorBufferCount[idx] = dataObject["linecount"].ToInt();
   
   double params[];
-  int paramsCount = dataObject["indicatorParams"].Size();
-  for(int i=0;i<paramsCount;i++){
+  indicatorParamCount[idx] = dataObject["params"].Size();
+  for(int i=0;i<indicatorParamCount[idx];i++){
     ArrayResize(params, i+1);
-    params[i] = dataObject["indicatorParams"][i].ToDbl();
+    params[i] = dataObject["params"][i].ToDbl();
   }
   
+  ENUM_TIMEFRAMES period = GetTimeframe(chartTF);
+
   // Case construct for passing variable parameter count to the iCustom function is used, because MQL5 does not seem to support expanding an array to a function parameter list
-  switch(paramsCount)
+  switch(indicatorParamCount[idx])
     {
      case 0:
-        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName);
+        indicators[idx] = iCustom(symbol,period,indicatorName);
         break;
      case 1:
-        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[0]);
+        indicators[idx] = iCustom(symbol,period,indicatorName, params[0]);
         break;
      case 2:
-        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2]);
+        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1]);
         break;
      case 3:
-        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3]);
+        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2]);
         break;
      case 4:
-        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4]);
+        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3]);
         break;
      case 5:
-        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4], params[5]);
+        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4]);
         break;
      case 6:
-        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4], params[5], params[6]);
+        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5]);
         break;
      case 7:
-        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4], params[5], params[6], params[7]);
+        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6]);
         break;
      case 8:
-        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8]);
+        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7]);
         break;
      case 9:
-        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8], params[9]);
+        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8]);
         break;
      case 10:
-        indicators[idx] = iCustom(symbol,GetTimeframe(chartTF),indicatorName, params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8], params[9], params[10]);
+        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8], params[9]);
         break;
      default:
         // TODO error handling
         break;
-    }
- 
-  GetIndicatorResult(dataObject);
-  
-  // TODO more error handling
-  if(SymbolInfoInteger(symbol, SYMBOL_EXIST)){  
-    ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
   }
-  else ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
+    
+
+  CJAVal message;
+  message["id"] = (string) id;
+              
+  string t=message.Serialize();
+  if(debug) Print(t);
+  InformClientSocket(indicatorDataSocket,t);
+
+  // TODO more error handling
+  //if(SymbolInfoInteger(symbol, SYMBOL_EXIST)){  
+  //  ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
+  //}
+  //else ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
 }
 
 //+------------------------------------------------------------------+
-//| Get indicator results                                           |
+//| Get indicator results                                            |
 //+------------------------------------------------------------------+
 void GetIndicatorResult(CJAVal &dataObject) {
    
-  datetime fromDate=StringToTime(dataObject["fromDate"].ToStr());
+  // TODO map Indicators Constants https://www.mql5.com/en/docs/constants/indicatorconstants
+   
+  datetime fromDate=dataObject["fromDate"].ToInt(); 
   string id=dataObject["id"].ToStr();
   string indicatorName=dataObject["indicatorName"].ToStr();
   
   int idx = GetIndicatorIdxByIndicatorId(id);
   
-  double values[10];
-  CJAVal results[10];
-
-    for(int i=0;i<10;i++){
-      values[i] = 0.0;
-      results[i] = 0.0;
-      if(idx >= 0) {
-        if(CopyBuffer(indicators[idx], i, fromDate, 1, values) < 0) values[0] = 0.0;
-        results[i] = DoubleToString(values[0]);
-      }
-      else {
-        // TODO error handling
-      }
+  double values[2];
+  ArrayResize(values, indicatorBufferCount[idx]);
+  CJAVal results;
+  // Cycle through all avaliable buffer positions
+  for(int i=0;i<indicatorBufferCount[idx];i++){
+    values[0] = 0.0;
+    values[1] = 0.0;
+    results[i] = 0.0;
+    if(idx >= 0) {
+      if(CopyBuffer(indicators[idx], i, fromDate, 1, values) < 0) {/* Error handling */}
+      results[i] = DoubleToString(values[0]);
     }
-
-  if (liveStream) {
-    CJAVal data;
-    data["id"] = (string) id;
-    data["data"].Set(results);
-              
-    string t=data.Serialize();
-    if(debug) Print(t);
-    InformClientSocket(indicatorDataSocket,t);
+    else {
+      // TODO error handling
+    }
   }
+
+
+  CJAVal message;
+  message["id"] = (string) id;
+  message["data"].Set(results);
+              
+  string t=message.Serialize();
+  if(debug) Print(t);
+  InformClientSocket(indicatorDataSocket,t);
+
+  // TODO more error handling
+  //if(SymbolInfoInteger(symbol, SYMBOL_EXIST)){  
+  //  ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
+  //}
+  //else ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
 }
 
 //+------------------------------------------------------------------+
@@ -1077,7 +1167,66 @@ ENUM_TIMEFRAMES GetTimeframe(string chartTF){
   else tf=NULL;
   return(tf);
 }
-  
+
+//+------------------------------------------------------------------+
+//| Convert indicator constants from string to int                   |
+//+------------------------------------------------------------------+
+int GetIndicatorConstantValue(string indicatorConstantString){
+
+   int r = -1;
+   ENUM_APPLIED_PRICE ap;
+   r = StringToEnum(indicatorConstantString,ap);
+   if(r>=0)return r;
+   
+   ENUM_APPLIED_VOLUME av;
+   r = StringToEnum(indicatorConstantString,av);
+   if(r>=0)return r;
+   
+   ENUM_STO_PRICE sp;
+   r = StringToEnum(indicatorConstantString,sp);
+   if(r>=0)return r;
+   
+   ENUM_MA_METHOD mm;
+   r = StringToEnum(indicatorConstantString,mm);
+   if(r>=0)return r;
+
+   return(-1);
+}
+
+#define MIN_ENUM_VALUES 0
+#define MAX_ENUM_VALUES 255
+//+------------------------------------------------------------------+
+//| StringToEnum : Convert a string to an ENUM value,                |
+//|   it loop between min(0) and max(255), adjustable if needed.     |
+//|   Non existing enum value defined as -1. If -1 is used as an     |
+//|   enum value, code need to be adjusted to an other default.      |
+//| Parameters :                                                     |
+//|   in       - string to convert                                   |
+//|   out      - ENUM value                                          |
+//|   @return  - int if conversion succeed, false otherwise          |
+//|                                                                  |
+//| Based on:                                                        |
+//| https://www.mql5.com/en/forum/61741/page3#comment_5491344        |
+//+------------------------------------------------------------------+
+template<typename ENUM>
+int StringToEnum(string in,ENUM &out)
+  {
+   out=-1;
+//---
+   for(int i=MIN_ENUM_VALUES;i<=MAX_ENUM_VALUES;i++)
+     {
+      ENUM enumValue=(ENUM)i;
+      if(in==EnumToString(enumValue))
+        {
+         out=enumValue;
+         break;
+        }
+     }
+//---
+   return(out);
+  }
+
+
 //+------------------------------------------------------------------+
 //| Trade confirmation                                               |
 //+------------------------------------------------------------------+
