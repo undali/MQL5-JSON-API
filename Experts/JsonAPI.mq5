@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //
 // Copyright (C) 2019 Nikolai Khramkov
 //
@@ -30,7 +30,12 @@
 #include <Trade/Trade.mqh>
 #include <Zmq/Zmq.mqh>
 #include <Json.mqh>
-#include <ChartObjects\ChartObject.mqh> 
+#include <EnumStringToInt.mqh>
+//#include <ChartObjects\ChartObject.mqh> 
+//#include<Canvas\Canvas.mqh>
+//#include <Graphics\Graphic.mqh>
+// Starts an Expert Advisor with specified parameters
+//#include <Expert.mqh>
 
 // Set ports and host for ZeroMQ
 string HOST="*";
@@ -39,6 +44,8 @@ int DATA_PORT=15556;
 int LIVE_PORT=15557;
 int STR_PORT=15558;
 int IND_DATA_PORT=15559;
+int CHART_LIVE_PORT=15560;
+int PUB_CHART_LIVE_PORT=15562;
 
 // ZeroMQ Cnnections
 Context context("MQL5 JSON API");
@@ -47,24 +54,65 @@ Socket dataSocket(context,ZMQ_PUSH);
 Socket liveSocket(context,ZMQ_PUSH);
 Socket streamSocket(context,ZMQ_PUSH);
 Socket indicatorDataSocket(context,ZMQ_PUSH);
+Socket chartLiveSocket(context,ZMQ_PULL);
+Socket pubChartLiveSocket(context,ZMQ_PUB);
 
 // Global variables
 bool debug = false;
 bool liveStream = true;
 bool connectedFlag= true;
 int deInitReason = -1;
+double chartAttached = ChartID();
 
 // Variables for handling price data stream
-string chartSymbols[];
-int chartSymbolCount = 0;
-string chartSymbolSettings[][3];
+struct SymbolSubscription {
+  string symbol;
+  string chartTf;
+  datetime lastBar;
+};
+
+SymbolSubscription symbolSubscriptions[];
+//string chartSymbols[];
+int symbolSubscriptionCount = 0;
+//string chartSymbolSettings[][3];
 
 // Variables for controlling indicators
+
+struct Indicator {
+  long id;
+  string indicatorId;
+  int indicatorHandle;
+  int indicatorParamCount;
+  int indicatorBufferCount;
+};
+Indicator indicators[];
 int indicatorCount = 0;
+/*
 double indicators[];
 string indicatorIds[];
 int indicatorParamCount[];
 int indicatorBufferCount[];
+*/
+
+// Variables for controlling chart
+struct ChartWindow {
+  long id;
+  string chartId;
+  string indicatorId;
+  int indicatorHandle;
+};
+ChartWindow chartWindows[];
+int chartWindowCount = 0;
+
+// Refresh chart windows interval. OnTimer function of indicatore JsonAPIIndicator gets triggered on each interval
+int chartWindowTimerInterval = 100;
+int chartWindowTimerCounter = 0;
+
+
+//string chartWindowObjects[];
+
+//double chartCurvePositions[][3];
+
 
 //+------------------------------------------------------------------+
 //| Bind ZMQ sockets to ports                                        |
@@ -82,17 +130,26 @@ bool BindSockets(){
   result = indicatorDataSocket.bind(StringFormat("tcp://%s:%d", HOST,IND_DATA_PORT));
   if (result == false) return result;
   
+  result = chartLiveSocket.bind(StringFormat("tcp://%s:%d", HOST,CHART_LIVE_PORT));
+  if (result == false) { return result; } else {Print("Bound 'Chart Live' socket on port ", CHART_LIVE_PORT);}
+  
+  result = pubChartLiveSocket.bind(StringFormat("tcp://%s:%d", HOST,PUB_CHART_LIVE_PORT));
+  if (result == false) { return result; } else {Print("Bound 'PUB Chart Live' socket on port ", PUB_CHART_LIVE_PORT);}
+  
   Print("Bound 'System' socket on port ", SYS_PORT);
   Print("Bound 'Data' socket on port ", DATA_PORT);
   Print("Bound 'Live' socket on port ", LIVE_PORT);
   Print("Bound 'Streaming' socket on port ", STR_PORT);
   Print("Bound 'Indicator Data' socket on port ", IND_DATA_PORT);
+
     
   sysSocket.setLinger(1000);
   dataSocket.setLinger(1000);
   liveSocket.setLinger(1000);
   streamSocket.setLinger(1000);
   indicatorDataSocket.setLinger(1000);
+  chartLiveSocket.setLinger(1000);
+  //pubChartLiveSocket.setLinger(1000);
     
   // Number of messages to buffer in RAM.
   sysSocket.setSendHighWaterMark(1);
@@ -100,6 +157,8 @@ bool BindSockets(){
   liveSocket.setSendHighWaterMark(1);
   streamSocket.setSendHighWaterMark(50);
   indicatorDataSocket.setSendHighWaterMark(5);
+  chartLiveSocket.setReceiveHighWaterMark(1); // TODO confirm settings
+  //pubChartLiveSocket.setReceiveHighWaterMark(1);
 
   return result;
 }
@@ -109,10 +168,10 @@ bool BindSockets(){
 //+------------------------------------------------------------------+
 int OnInit(){
   /* Bindinig ZMQ ports on init */
-Print(GetIndicatorConstantValue("VOLUME_TICK"), " ",VOLUME_TICK);
+
   // Skip reloading of the EA script when the reason to reload is a chart timeframe change
   if (deInitReason != REASON_CHARTCHANGE){
-  
+ 
     EventSetMillisecondTimer(1);
 
     int bindSocketsDelay = 65; // Seconds to wait if binding of sockets fails.
@@ -136,50 +195,6 @@ Print(GetIndicatorConstantValue("VOLUME_TICK"), " ",VOLUME_TICK);
   return(INIT_SUCCEEDED);
 }
 
-void testDraw() {
-// ChartSetSymbolPeriod(ChartID(), Symbol(),PERIOD_M1);
-
- // long chart_id;
- //   chart_id = ChartOpen("EURUSD",PERIOD_M1);
- // Print(chart_id);
-
-long chart_id = 0;
-  int window = 0;
-
-  datetime time1 = 1581891300;
-  double price1 = 1.08346;
-  datetime time2 = 1581891600;
-  double price2 = 1.08354;
-  chart_id = ChartOpen("EURUSD",PERIOD_M5);
-  Print(chart_id);
-  /*
-  bool CChartObjectTrend::Create(long chart_id,string name,int window,
-                                   datetime time1,double price1,datetime time2,double price2)
-  {
-   bool result=ObjectCreate(chart_id,name,OBJ_TREND,window,time1,price1,time2,price2);
-   if(result) result&=Attach(chart_id,name,window,2);
-//---
-   return(result);
-  }
-  */
-     CChartObject object;
-     //ObjectCreate(chart_id,"ellipse",OBJ_ELLIPSE,window,time1,price1,time2,price2,time2,price2+0.00005);
-     //ObjectCreate(chart_id,"ellipse",OBJ_ELLIPSE,window,time1-100,price1,time1,price1+0.00010,time1+200,price1);
-     //ObjectCreate(chart_id,"trend",OBJ_TREND,window,time1,price1,time2,price2);
-     ObjectCreate(chart_id,"reactangle",OBJ_TREND,window,time1,price1+0.00010,time2,price2+0.00020);
-
-
-   //--- attach chart object  
-   /*
-   if(!object.Attach(ChartID(),"MyObject",0,2)) 
-     { 
-      printf("Object attach error"); 
-
-     }
-    */
-   //ChartSetSymbolPeriod(ChartID(), Symbol(),PERIOD_M5);
-   ChartRedraw(chart_id);
-}
 //+------------------------------------------------------------------+
 //| Expert deinitialization function                                 |
 //+------------------------------------------------------------------+
@@ -204,12 +219,22 @@ void OnDeinit(const int reason){
       liveSocket.unbind(StringFormat("tcp://%s:%d", HOST,LIVE_PORT));
       Print("Unbinding 'Streaming' socket on port ", STR_PORT, "..");
       streamSocket.unbind(StringFormat("tcp://%s:%d", HOST,STR_PORT));
+      Print("Unbinding 'CHart' socket on port ", STR_PORT, "..");
+      streamSocket.unbind(StringFormat("tcp://%s:%d", HOST,CHART_LIVE_PORT));
+      Print("Unbinding 'pub chart' socket on port ", STR_PORT, "..");
+      streamSocket.unbind(StringFormat("tcp://%s:%d", HOST,PUB_CHART_LIVE_PORT));
       
       // Shutdown ZeroMQ Context
       context.shutdown();
       context.destroy(0);
       
+      // Reset
+      ResetSubscriptionsAndIndicators();
+      
       EventKillTimer();
+      for(int i=0;i<ArraySize(chartWindows);i++){
+        ChartClose(chartWindows[i].id);
+      }
   }
 }
 
@@ -220,13 +245,13 @@ void OnTick(){
 */
 
 //+------------------------------------------------------------------+
-//| Check if subscribed to symbol and timeframe combination                                 |
+//| Check if subscribed to symbol and timeframe combination          |
 //+------------------------------------------------------------------+
 bool HasChartSymbol(string symbol, string chartTF)
   {
-     for(int i=0;i<ArraySize(chartSymbols);i++)
+     for(int i=0;i<ArraySize(symbolSubscriptions);i++)
      {
-      if(chartSymbolSettings[i][0] == symbol && chartSymbolSettings[i][1] == chartTF){
+      if(symbolSubscriptions[i].symbol == symbol && symbolSubscriptions[i].chartTf == chartTF){
           return true;
       }
      }
@@ -240,7 +265,7 @@ int GetIndicatorIdxByIndicatorId(string indicatorId)
   {
      for(int i=0;i<indicatorCount;i++)
      {
-      if(indicatorIds[i] == indicatorId){
+      if(indicators[i].indicatorId == indicatorId){
           return i;
       }
      }
@@ -248,19 +273,33 @@ int GetIndicatorIdxByIndicatorId(string indicatorId)
   }
 
 //+------------------------------------------------------------------+
-//| Stream live price data                                          |
+//| Get index of chart window array by chart window id string        |
+//+------------------------------------------------------------------+
+int GetChartWindowIdxByChartWindowId(string chartWindowId)
+  {
+     for(int i=0;i<chartWindowCount;i++)
+     {
+      if(chartWindows[i].chartId == chartWindowId){
+          return i;
+      }
+     }
+     return -1;
+  }
+
+//+------------------------------------------------------------------+
+//| Stream live price data                                           |
 //+------------------------------------------------------------------+
 void StreamPriceData(){
   // If liveStream == true, push last candle to liveSocket. 
   if(liveStream){
     CJAVal last;
     if(TerminalInfoInteger(TERMINAL_CONNECTED)){
-      connectedFlag=true; 
-      for(int i=0;i<chartSymbolCount;i++){
-        string symbol=chartSymbolSettings[i][0];
-        string chartTF=chartSymbolSettings[i][1];
-        datetime lastBar=chartSymbolSettings[i][2];
-        
+      connectedFlag=true;
+      for(int i=0;i<symbolSubscriptionCount;i++){
+        string symbol=symbolSubscriptions[i].symbol;
+        string chartTF=symbolSubscriptions[i].chartTf;
+        datetime lastBar=symbolSubscriptions[i].lastBar;
+        //Print(symbol," ", chartTF," ",lastBar);
         CJAVal Data;
         ENUM_TIMEFRAMES period = GetTimeframe(chartTF);
         
@@ -303,10 +342,10 @@ void StreamPriceData(){
             string t=last.Serialize();
             if(debug) Print(t);
             InformClientSocket(liveSocket,t);
-            chartSymbolSettings[i][2]=thisBar;
+            symbolSubscriptions[i].lastBar=thisBar;
   
           }
-          else chartSymbolSettings[i][2]=thisBar;
+          else symbolSubscriptions[i].lastBar=thisBar;
         }
       }
     }
@@ -329,9 +368,10 @@ void StreamPriceData(){
 //+------------------------------------------------------------------+
 void OnTimer(){
 
-  ZmqMsg request;
-
+  // Stream live price data
   StreamPriceData();
+  
+  ZmqMsg request;
   
   // Get request from client via System socket.
   sysSocket.recv(request,true);
@@ -341,24 +381,28 @@ void OnTimer(){
     // Pull request to RequestHandler().
     RequestHandler(request);
   }
-
-}
-
-/*
-//+------------------------------------------------------------------+
-//| ChartEvent function                                              |
-//| This function must be declared, even if it empty.                |
-//+------------------------------------------------------------------+
-
-void OnChartEvent(const int id,         // event id
-                  const long& lparam,   // event param of long type
-                  const double& dparam, // event param of double type
-                  const string& sparam) // event param of string type
-
-  {
-   //--- Add your code here...
+ 
+  // Publish indicator values for the JsonAPIIndicator indicator
+  ZmqMsg chartMsg;
+  chartLiveSocket.recv(chartMsg, true);
+  if(chartMsg.size()>0){
+    Print(chartMsg.getData());
+    pubChartLiveSocket.send(chartMsg,true);
+  ResetLastError();  
   }
-*/
+  
+  // Trigger the indicator JsonAPIIndicator to check for new Messages
+  if(chartWindowTimerCounter >= chartWindowTimerInterval) {
+    for(int i=0;i<ArraySize(chartWindows);i++){
+      long ChartId = chartWindows[i].id;
+      string chartIndicatorId = chartWindows[i].indicatorId;
+      EventChartCustom(ChartId, 222, 222, 222.0, chartIndicatorId);
+    }
+    chartWindowTimerCounter = 0;
+  }
+  else chartWindowTimerCounter++;
+  
+}
 
 //+------------------------------------------------------------------+
 //| Request handler                                                  |
@@ -395,6 +439,7 @@ void RequestHandler(ZmqMsg &request){
   else if(action=="ORDERS")     GetOrders(message);
   else if(action=="RESET")      ResetSubscriptionsAndIndicators();
   else if(action=="INDICATOR")  IndicatorControl(message);
+  else if(action=="CHART")      ChartControl(message);
   // Action command error processing
   else ActionDoneOrError(65538, __FUNCTION__);
    
@@ -404,29 +449,36 @@ void RequestHandler(ZmqMsg &request){
 //| Reconfigure the script params                                    |
 //+------------------------------------------------------------------+
 void ScriptConfiguration(CJAVal &dataObject){
-  //testDraw();
+
   string symbol=dataObject["symbol"].ToStr();
   string chartTF=dataObject["chartTF"].ToStr();
-  string actionType=dataObject["actionType"].ToStr();
+  //string actionType=dataObject["actionType"].ToStr();
 
+  ArrayResize(symbolSubscriptions, symbolSubscriptionCount+1);
+  symbolSubscriptions[symbolSubscriptionCount].symbol = symbol;
+  symbolSubscriptions[symbolSubscriptionCount].chartTf = chartTF;
+  // to initialze with value 0 skips the first price
+  symbolSubscriptions[symbolSubscriptionCount].lastBar = 0;
+  symbolSubscriptionCount++;
+/*
   string symbArr[1];
   symbArr[0]= symbol;
   
   if (!HasChartSymbol(symbol, chartTF)) {
     ArrayInsert(chartSymbols,symbArr,0);
-    ArrayResize(chartSymbolSettings,chartSymbolCount+1);
-    chartSymbolSettings[chartSymbolCount][0]=symbol;
-    chartSymbolSettings[chartSymbolCount][1]=chartTF;
+    ArrayResize(chartSymbolSettings,symbolSubscriptionCount+1);
+    chartSymbolSettings[symbolSubscriptionCount][0]=symbol;
+    chartSymbolSettings[symbolSubscriptionCount][1]=chartTF;
     // lastBar
-    chartSymbolSettings[chartSymbolCount][2]=0; // to initialze with value 0 skips the first price 
-    chartSymbolCount++;
+    chartSymbolSettings[symbolSubscriptionCount][2]=0; // to initialze with value 0 skips the first price 
+    symbolSubscriptionCount++;
   }
+*/
   
   if(SymbolInfoInteger(symbol, SYMBOL_EXIST)){  
     ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
   }
   else ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
-
 }
 
 //+------------------------------------------------------------------+
@@ -442,7 +494,6 @@ void IndicatorControl(CJAVal &dataObject){
   else if(actionType=="START") {
     StartIndicator(dataObject);
   }
-  
 }
   
 //+------------------------------------------------------------------+
@@ -457,18 +508,18 @@ void StartIndicator(CJAVal &dataObject){
   
   indicatorCount++;    
   ArrayResize(indicators,indicatorCount);
-  ArrayResize(indicatorIds,indicatorCount);
-  ArrayResize(indicatorParamCount,indicatorCount);
-  ArrayResize(indicatorBufferCount,indicatorCount);
+  //ArrayResize(indicatorIds,indicatorCount);
+  //ArrayResize(indicatorParamCount,indicatorCount);
+  //ArrayResize(indicatorBufferCount,indicatorCount);
   
   int idx = indicatorCount-1;
   
-  indicatorIds[idx] = id;
-  indicatorBufferCount[idx] = dataObject["linecount"].ToInt();
+  indicators[idx].indicatorId = id;
+  indicators[idx].indicatorBufferCount = dataObject["linecount"].ToInt();
   
   double params[];
-  indicatorParamCount[idx] = dataObject["params"].Size();
-  for(int i=0;i<indicatorParamCount[idx];i++){
+  indicators[idx].indicatorParamCount = dataObject["params"].Size();
+  for(int i=0;i<indicators[idx].indicatorParamCount;i++){
     ArrayResize(params, i+1);
     params[i] = dataObject["params"][i].ToDbl();
   }
@@ -476,40 +527,40 @@ void StartIndicator(CJAVal &dataObject){
   ENUM_TIMEFRAMES period = GetTimeframe(chartTF);
 
   // Case construct for passing variable parameter count to the iCustom function is used, because MQL5 does not seem to support expanding an array to a function parameter list
-  switch(indicatorParamCount[idx])
+  switch(indicators[idx].indicatorParamCount)
     {
      case 0:
-        indicators[idx] = iCustom(symbol,period,indicatorName);
+        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName);
         break;
      case 1:
-        indicators[idx] = iCustom(symbol,period,indicatorName, params[0]);
+        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0]);
         break;
      case 2:
-        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1]);
+        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1]);
         break;
      case 3:
-        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2]);
+        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2]);
         break;
      case 4:
-        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3]);
+        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3]);
         break;
      case 5:
-        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4]);
+        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4]);
         break;
      case 6:
-        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5]);
+        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5]);
         break;
      case 7:
-        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6]);
+        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6]);
         break;
      case 8:
-        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7]);
+        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7]);
         break;
      case 9:
-        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8]);
+        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8]);
         break;
      case 10:
-        indicators[idx] = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8], params[9]);
+        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8], params[9]);
         break;
      default:
         // TODO error handling
@@ -545,15 +596,15 @@ void GetIndicatorResult(CJAVal &dataObject) {
   int idx = GetIndicatorIdxByIndicatorId(id);
   
   double values[2];
-  ArrayResize(values, indicatorBufferCount[idx]);
+  ArrayResize(values, indicators[idx].indicatorBufferCount);
   CJAVal results;
   // Cycle through all avaliable buffer positions
-  for(int i=0;i<indicatorBufferCount[idx];i++){
+  for(int i=0;i<indicators[idx].indicatorBufferCount;i++){
     values[0] = 0.0;
     values[1] = 0.0;
     results[i] = 0.0;
     if(idx >= 0) {
-      if(CopyBuffer(indicators[idx], i, fromDate, 1, values) < 0) {/* Error handling */}
+      if(CopyBuffer(indicators[idx].indicatorHandle, i, fromDate, 1, values) < 0) {/* Error handling */}
       results[i] = DoubleToString(values[0]);
     }
     else {
@@ -575,6 +626,237 @@ void GetIndicatorResult(CJAVal &dataObject) {
   //  ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
   //}
   //else ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
+}
+
+//+------------------------------------------------------------------+
+//| Open new chart or add indicator to chart                         |
+//+------------------------------------------------------------------+
+
+void ChartControl(CJAVal &dataObject){
+
+  string actionType=dataObject["actionType"].ToStr();
+
+  if(actionType=="ADDINDICATOR") {
+    AddIndicatorChartToChart(dataObject);
+  }
+  else if(actionType=="OPEN") {
+    OpenChart(dataObject);
+  }
+}
+
+//+------------------------------------------------------------------+
+//| Open new chart                                                   |
+//+------------------------------------------------------------------+
+void OpenChart(CJAVal &dataObject){
+
+  string chartId=dataObject["chartId"].ToStr();
+  string symbol=dataObject["symbol"].ToStr();
+  string chartTF=dataObject["chartTF"].ToStr();
+  
+  chartWindowCount++;    
+  ArrayResize(chartWindows,chartWindowCount);
+  //ArrayResize(chartWindowIds,chartWindowCount);
+  //ArrayResize(chartWindowPeriods,chartWindowCount);
+  // ArrayResize(chartWindowObjects,chartWindowCount);
+  
+  int idx = chartWindowCount-1;
+  
+  chartWindows[idx].chartId = chartId;
+
+  ENUM_TIMEFRAMES period = GetTimeframe(chartTF);
+  chartWindows[idx].id = ChartOpen(symbol, period);
+  //chartWindowPeriods[idx] = period;
+  
+  CJAVal message;
+  message["chartId"] = (string) chartId;
+              
+  string t=message.Serialize();
+  if(debug) Print(t);
+  InformClientSocket(dataSocket,t);
+}
+
+//+------------------------------------------------------------------+
+//| Add JsonAPIIndicator indicator chart to chart                    |
+//+------------------------------------------------------------------+
+void AddIndicatorChartToChart(CJAVal &dataObject){
+
+  string chartIdStr=dataObject["chartId"].ToStr();
+  string chartIndicatorId=dataObject["indicatorChartId"].ToStr();
+  int chartIndicatorSubWindow=dataObject["chartIndicatorSubWindow"].ToInt();
+  string shortname = dataObject["style"]["shortname"].ToStr();
+  string colorstyle = dataObject["style"]["color"].ToStr();
+  string linetype = dataObject["style"]["linetype"].ToStr();
+  string linestyle = dataObject["style"]["linestyle"].ToStr();
+  int linewidth = dataObject["style"]["linewidth"].ToInt();
+
+  int idx = GetChartWindowIdxByChartWindowId(chartIdStr);
+  long ChartId = chartWindows[idx].id;
+
+  double chartIndicatorHandle = iCustom(ChartSymbol(ChartId),ChartPeriod(ChartId),"JsonAPIIndicator",chartIndicatorId,shortname,colorstyle,linetype,linestyle,linewidth);
+        
+  ChartIndicatorAdd(ChartId, chartIndicatorSubWindow, chartIndicatorHandle);
+  
+  chartWindows[idx].indicatorId = chartIndicatorId;
+  chartWindows[idx].indicatorHandle = chartIndicatorHandle;
+  
+  CJAVal message;
+  message["chartId"] = (string) chartIdStr;
+              
+  string t=message.Serialize();
+  if(debug) Print(t);
+  InformClientSocket(dataSocket,t);
+}
+
+//+------------------------------------------------------------------+
+//| Draw on chart                                                    |
+//+------------------------------------------------------------------+
+void ChartDraw(CJAVal &dataObject){
+/*
+  Print("drawchart");
+
+  string id=dataObject["id"].ToStr();
+  //int windowIdx = GetChartWindowIdxByChartWindowId(id);
+  
+  int datesSize = dataObject["data"][0].Size();
+  int x[];
+  int y[];
+  double x_dbl[];
+  double y_dbl[];
+  ArrayResize(chartCurvePositions, datesSize);
+  ArrayResize(x,datesSize);
+  ArrayResize(y,datesSize);
+  ArrayResize(x_dbl,datesSize);
+  ArrayResize(y_dbl,datesSize);
+  for(int i=0;i<datesSize;i++){
+    chartCurvePositions[i][0] = dataObject["data"][0][i].ToDbl();
+    chartCurvePositions[i][1] = dataObject["data"][1][i].ToDbl();
+    //chartCurvePositions[i][2] = dataObject["data"]["dates"][2].ToDbl();
+
+    //ChartTimePriceToXY(windowIdx, 0, chartCurvePositions[i][0], chartCurvePositions[i][1], x[i], y[i]);
+    //x_dbl[i] = x[i];
+    //y_dbl[i] = y[i];
+  }
+   int firstBarIdx = ChartGetInteger(0,CHART_FIRST_VISIBLE_BAR,0);
+   int lastBarIdx = firstBarIdx + ChartGetInteger(0, CHART_VISIBLE_BARS,0);
+   
+   MqlRates ratesFirst[];
+   MqlRates ratesLast[];
+   CopyRates(Symbol(),PERIOD_M1,firstBarIdx,1, ratesFirst);
+   CopyRates(Symbol(),PERIOD_M1,lastBarIdx,1, ratesLast);
+   //Print(chartCurvePositions[0][0]);
+   int idxStart = ArrayBsearch(chartCurvePositions, ratesFirst[0].time); 
+   int idxEnd = ArrayBsearch(chartCurvePositions, ratesLast[0].time);
+   Print(StringToTime(ratesFirst[0].time));
+   Print(ratesLast[0].time);
+   Print("start ", idxStart, " end ", idxEnd, " r " ,ratesFirst[0].time, " ",ratesLast[0].time, " fidx ", firstBarIdx, " lidx ", lastBarIdx );
+   
+
+   int j = 0;
+   for(int i=idxStart;i<idxEnd;i++){
+    ChartTimePriceToXY(0, 0, chartCurvePositions[i][0], chartCurvePositions[i][1], x[j], y[j]);
+    x_dbl[j] = x[j];
+    y_dbl[j] = y[j];
+    j++; 
+   }
+*/
+
+
+/*
+   //Print("x ",x[0], x_dbl[0]);
+   CGraphic graphic;
+   uint c = ColorToARGB(clrBlue,0x55);
+   int height=ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
+   int width=ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
+   Print("CHART_HEIGHT_IN_PIXELS =",height,"pixels");
+   Print("CHART_WIDTH_IN_PIXELS =",width,"pixels");
+   graphic.Create(0,"Graphic",0,0,0,width,height);
+   graphic.BackgroundColor(clrBlue);
+   Print(graphic.BackgroundColor(), " ", clrBlue);
+   //graphic.Create(0,"Graphic",0,30,30,780,380);
+   double xx_dbl[]={-10,-4,-1,2,3,4,5,6,7,8};
+   double yy_dbl[]={-5,4,-10,23,17,18,-9,13,17,4};
+   CCurve *curve=graphic.CurveAdd(x_dbl,y_dbl,CURVE_LINES,"curveName");
+   graphic.CurvePlotAll();
+   graphic.Update();
+   //curve.Update(x,y);
+   //Print(curve.Name());
+*/
+}
+
+void ChartDrawX(CJAVal &dataObject){
+
+  // DONT DRAW, if chartid noes not exist any more
+
+  string id=dataObject["id"].ToStr();
+
+  string graphicsType=dataObject["data"]["graphicstype"].ToStr();
+  
+  if (graphicsType=="line") {
+    string objectId=dataObject["data"]["objectId"].ToStr();
+    datetime fromDate=dataObject["data"]["fromDate"].ToInt();
+    datetime toDate=dataObject["data"]["toDate"].ToInt(); 
+    double fromPrice=dataObject["data"]["fromPrice"].ToDbl();
+    double toPrice=dataObject["data"]["toPrice"].ToDbl();
+
+
+  /*
+  double params[];
+  for(int i=0;i<dataObject["params"].Size();i++){
+    ArrayResize(params, i+1);
+    params[i] = dataObject["params"][i].ToDbl();
+  }
+  */
+  //int paramColor = dataObject["params"]["color"]
+  
+  int idx = GetChartWindowIdxByChartWindowId(id);
+  
+  //int thisChartWindowObjectsCount =  ArraySize(chartWindowObjects);
+  //ArrayResize(chartWindowObjects, thisChartWindowObjectsCount+1);
+  //chartWindowObjects[thisChartWindowObjectsCount] = objectId; // do I need this for deinit/reset? Probably Closing chart is sufficient
+
+  long chart_id = chartWindows[idx].id;
+  int window = 0;
+  //CChartObject object;
+  //bool success = ObjectCreate(chart_id,objectId,OBJ_TREND,window,fromDate,fromPrice,toDate,toPrice); // add color param
+  // ChartRedraw(chart_id);
+ 
+  
+  }
+  
+  // datetime time1 = 1581891300;
+  // double price1 = 1.08346;
+  // datetime time2 = 1581891600;
+  // double price2 = 1.08354;
+  
+  //chart_id = ChartOpen("EURUSD",PERIOD_M5);
+  //Print(chart_id);
+  /*
+  bool CChartObjectTrend::Create(long chart_id,string name,int window,
+                                   datetime time1,double price1,datetime time2,double price2)
+  {
+   bool result=ObjectCreate(chart_id,name,OBJ_TREND,window,time1,price1,time2,price2);
+   if(result) result&=Attach(chart_id,name,window,2);
+//---
+   return(result);
+  }
+  */
+     // CChartObject object;
+     //ObjectCreate(chart_id,"ellipse",OBJ_ELLIPSE,window,time1,price1,time2,price2,time2,price2+0.00005);
+     //ObjectCreate(chart_id,"ellipse",OBJ_ELLIPSE,window,time1-100,price1,time1,price1+0.00010,time1+200,price1);
+     //ObjectCreate(chart_id,"trend",OBJ_TREND,window,time1,price1,time2,price2);
+     // ObjectCreate(chart_id,"reactangle",OBJ_TREND,window,time1,price1+0.00010,time2,price2+0.00020);
+
+
+   //--- attach chart object  
+   /*
+   if(!object.Attach(ChartID(),"MyObject",0,2)) 
+     { 
+      printf("Object attach error"); 
+
+     }
+    */
+   //ChartSetSymbolPeriod(ChartID(), Symbol(),PERIOD_M5);
+   //ChartRedraw(chart_id);
 }
 
 //+------------------------------------------------------------------+
@@ -950,19 +1232,24 @@ void GetOrders(CJAVal &dataObject){
 
 void ResetSubscriptionsAndIndicators(){
 
-   ArrayFree(chartSymbols);
-   ArrayFree(chartSymbolSettings);
-   chartSymbolCount=0;
+   ArrayFree(symbolSubscriptions);
+   //ArrayFree(chartSymbolSettings);
+   symbolSubscriptionCount=0;
    
    bool error = false;
-   for(int i=0;i<chartSymbolCount;i++){
-    if(!IndicatorRelease(indicators[i])) error = true;
+   for(int i=0;i<indicatorCount;i++){
+    if(!IndicatorRelease(indicators[i].indicatorHandle)) error = true;
    }
    ArrayFree(indicators);
-   ArrayFree(indicatorIds);
+   //ArrayFree(indicatorIds);
    indicatorCount = 0;
    
-   if(ArraySize(chartSymbols)!=0 || ArraySize(chartSymbolSettings)!=0 || ArraySize(indicators)!=0 || ArraySize(indicatorIds)!=0 || error){
+   for(int i=0;i<ArraySize(chartWindows);i++){
+    if(!IndicatorRelease(chartWindows[i].indicatorHandle)) error = true;
+    ChartClose(chartWindows[i].id);
+   }
+   
+   if(ArraySize(symbolSubscriptions)!=0 || ArraySize(indicators)!=0 || ArraySize(chartWindows)!=0 || error){
    // TODO Implement propery error codes and descriptions
    ActionDoneOrError(GetLastError(),  __FUNCTION__);
    }
@@ -1169,65 +1456,6 @@ ENUM_TIMEFRAMES GetTimeframe(string chartTF){
 }
 
 //+------------------------------------------------------------------+
-//| Convert indicator constants from string to int                   |
-//+------------------------------------------------------------------+
-int GetIndicatorConstantValue(string indicatorConstantString){
-
-   int r = -1;
-   ENUM_APPLIED_PRICE ap;
-   r = StringToEnum(indicatorConstantString,ap);
-   if(r>=0)return r;
-   
-   ENUM_APPLIED_VOLUME av;
-   r = StringToEnum(indicatorConstantString,av);
-   if(r>=0)return r;
-   
-   ENUM_STO_PRICE sp;
-   r = StringToEnum(indicatorConstantString,sp);
-   if(r>=0)return r;
-   
-   ENUM_MA_METHOD mm;
-   r = StringToEnum(indicatorConstantString,mm);
-   if(r>=0)return r;
-
-   return(-1);
-}
-
-#define MIN_ENUM_VALUES 0
-#define MAX_ENUM_VALUES 255
-//+------------------------------------------------------------------+
-//| StringToEnum : Convert a string to an ENUM value,                |
-//|   it loop between min(0) and max(255), adjustable if needed.     |
-//|   Non existing enum value defined as -1. If -1 is used as an     |
-//|   enum value, code need to be adjusted to an other default.      |
-//| Parameters :                                                     |
-//|   in       - string to convert                                   |
-//|   out      - ENUM value                                          |
-//|   @return  - int if conversion succeed, false otherwise          |
-//|                                                                  |
-//| Based on:                                                        |
-//| https://www.mql5.com/en/forum/61741/page3#comment_5491344        |
-//+------------------------------------------------------------------+
-template<typename ENUM>
-int StringToEnum(string in,ENUM &out)
-  {
-   out=-1;
-//---
-   for(int i=MIN_ENUM_VALUES;i<=MAX_ENUM_VALUES;i++)
-     {
-      ENUM enumValue=(ENUM)i;
-      if(in==EnumToString(enumValue))
-        {
-         out=enumValue;
-         break;
-        }
-     }
-//---
-   return(out);
-  }
-
-
-//+------------------------------------------------------------------+
 //| Trade confirmation                                               |
 //+------------------------------------------------------------------+
 void OrderDoneOrError(bool error, string funcName, CTrade &trade){
@@ -1387,3 +1615,4 @@ string getUninitReasonText(int reasonCode)
 //---
    return text;
   }
+  
