@@ -31,6 +31,7 @@
 #include <Zmq/Zmq.mqh>
 #include <Json.mqh>
 #include <EnumStringToInt.mqh>
+#include <ControlErrors.mqh>
 //#include <ChartObjects\ChartObject.mqh> 
 //#include<Canvas\Canvas.mqh>
 //#include <Graphics\Graphic.mqh>
@@ -70,14 +71,10 @@ struct SymbolSubscription {
   string chartTf;
   datetime lastBar;
 };
-
 SymbolSubscription symbolSubscriptions[];
-//string chartSymbols[];
 int symbolSubscriptionCount = 0;
-//string chartSymbolSettings[][3];
 
 // Variables for controlling indicators
-
 struct Indicator {
   long id;
   string indicatorId;
@@ -87,12 +84,6 @@ struct Indicator {
 };
 Indicator indicators[];
 int indicatorCount = 0;
-/*
-double indicators[];
-string indicatorIds[];
-int indicatorParamCount[];
-int indicatorBufferCount[];
-*/
 
 // Variables for controlling chart
 struct ChartWindow {
@@ -108,6 +99,7 @@ int chartWindowCount = 0;
 int chartWindowTimerInterval = 100;
 int chartWindowTimerCounter = 0;
 
+ControlErrors mControl;
 
 //string chartWindowObjects[];
 
@@ -120,28 +112,19 @@ int chartWindowTimerCounter = 0;
 bool BindSockets(){
   bool result = false;
   result = sysSocket.bind(StringFormat("tcp://%s:%d", HOST,SYS_PORT));
-  if (result == false) return result;
+  if (result == false) { return result; } else {Print("Bound 'System' socket on port ", SYS_PORT);}
   result = dataSocket.bind(StringFormat("tcp://%s:%d", HOST,DATA_PORT));
-  if (result == false) return result;
+  if (result == false) { return result; } else {Print("Bound 'Data' socket on port ", DATA_PORT);}
   result = liveSocket.bind(StringFormat("tcp://%s:%d", HOST,LIVE_PORT));
-  if (result == false) return result;
+  if (result == false) { return result; } else {Print("Bound 'Live' socket on port ", LIVE_PORT);}
   result = streamSocket.bind(StringFormat("tcp://%s:%d", HOST,STR_PORT));
-  if (result == false) return result;
+  if (result == false) { return result; } else {Print("Bound 'Streaming' socket on port ", STR_PORT);}
   result = indicatorDataSocket.bind(StringFormat("tcp://%s:%d", HOST,IND_DATA_PORT));
-  if (result == false) return result;
-  
+  if (result == false) { return result; } else {Print("Bound 'Indicator Data' socket on port ", IND_DATA_PORT);}
   result = chartLiveSocket.bind(StringFormat("tcp://%s:%d", HOST,CHART_LIVE_PORT));
   if (result == false) { return result; } else {Print("Bound 'Chart Live' socket on port ", CHART_LIVE_PORT);}
-  
   result = pubChartLiveSocket.bind(StringFormat("tcp://%s:%d", HOST,PUB_CHART_LIVE_PORT));
   if (result == false) { return result; } else {Print("Bound 'PUB Chart Live' socket on port ", PUB_CHART_LIVE_PORT);}
-  
-  Print("Bound 'System' socket on port ", SYS_PORT);
-  Print("Bound 'Data' socket on port ", DATA_PORT);
-  Print("Bound 'Live' socket on port ", LIVE_PORT);
-  Print("Bound 'Streaming' socket on port ", STR_PORT);
-  Print("Bound 'Indicator Data' socket on port ", IND_DATA_PORT);
-
     
   sysSocket.setLinger(1000);
   dataSocket.setLinger(1000);
@@ -149,7 +132,7 @@ bool BindSockets(){
   streamSocket.setLinger(1000);
   indicatorDataSocket.setLinger(1000);
   chartLiveSocket.setLinger(1000);
-  //pubChartLiveSocket.setLinger(1000);
+  pubChartLiveSocket.setLinger(1000);
     
   // Number of messages to buffer in RAM.
   sysSocket.setSendHighWaterMark(1);
@@ -158,7 +141,7 @@ bool BindSockets(){
   streamSocket.setSendHighWaterMark(50);
   indicatorDataSocket.setSendHighWaterMark(5);
   chartLiveSocket.setReceiveHighWaterMark(1); // TODO confirm settings
-  //pubChartLiveSocket.setReceiveHighWaterMark(1);
+  pubChartLiveSocket.setReceiveHighWaterMark(1);
 
   return result;
 }
@@ -167,8 +150,15 @@ bool BindSockets(){
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit(){
-  /* Bindinig ZMQ ports on init */
 
+  // Settimg up error reporting
+  mControl.SetAlert(true);
+  //mControl.SetPrint(true);
+  mControl.SetSound(false);
+  mControl.SetWriteFlag(false);
+  //mControl.SetPlaySoundFile("news.wav");
+  
+  /* Bindinig ZMQ ports on init */  
   // Skip reloading of the EA script when the reason to reload is a chart timeframe change
   if (deInitReason != REASON_CHARTCHANGE){
  
@@ -232,9 +222,6 @@ void OnDeinit(const int reason){
       ResetSubscriptionsAndIndicators();
       
       EventKillTimer();
-      for(int i=0;i<ArraySize(chartWindows);i++){
-        ChartClose(chartWindows[i].id);
-      }
   }
 }
 
@@ -308,13 +295,16 @@ void StreamPriceData(){
         MqlRates rates[1];
         int spread[1];
         
+      //if(CopyBuffer(indicators[idx].indicatorHandle, i, fromDate, 1, values) < 0) {
+      //  CheckError(__FUNCTION__, indicatorDataSocket);
+      //}
         if( chartTF == "TICK"){
-          if(SymbolInfoTick(symbol,tick) !=true) { /*error processing */ };
+          if(SymbolInfoTick(symbol,tick) !=true) { /*mControl.Check();*/ }
           thisBar=(datetime) tick.time_msc;
         }
         else {
-          if(CopyRates(symbol,period,1,1,rates)!=1) { /*error processing */ };
-          if(CopySpread(symbol,period,1,1,spread)!=1) { /*error processing */ };
+          if(CopyRates(symbol,period,1,1,rates)!=1) { /*mControl.Check();*/ }
+          if(CopySpread(symbol,period,1,1,spread)!=1) { /*mControl.Check();*/; }
           thisBar=(datetime)rates[0].time;
         }
         if(lastBar!=thisBar){
@@ -409,39 +399,52 @@ void OnTimer(){
 //+------------------------------------------------------------------+
 void RequestHandler(ZmqMsg &request){
 
-  CJAVal message;
-        
+  CJAVal incomingMessage;
+      
   ResetLastError();
   // Get data from reguest
   string msg=request.getData();
-  
+
   if(debug) Print("Processing:"+msg);
   
   // Deserialize msg to CJAVal array
+  /*
   if(!message.Deserialize(msg)){
     ActionDoneOrError(65537, __FUNCTION__);
     Alert("Deserialization Error");
     ExpertRemove();
   }
+  */
+  
+  if(!incomingMessage.Deserialize(msg)){
+    mControl.mSetUserError(65537, GetErrorID(65537));
+    CheckError(__FUNCTION__);
+    //ExpertRemove();
+  }
+
   // Send response to System socket that request was received
   // Some historical data requests can take a lot of time
   InformClientSocket(sysSocket, "OK");
-  
+
   // Process action command
-  string action = message["action"].ToStr();
-  
-  if(action=="CONFIG")          ScriptConfiguration(message);
+  string action = incomingMessage["action"].ToStr();
+
+  if(action=="CONFIG")          ScriptConfiguration(incomingMessage);
   else if(action=="ACCOUNT")    GetAccountInfo();
   else if(action=="BALANCE")    GetBalanceInfo();
-  else if(action=="HISTORY")    HistoryInfo(message);
-  else if(action=="TRADE")      TradingModule(message);
-  else if(action=="POSITIONS")  GetPositions(message);
-  else if(action=="ORDERS")     GetOrders(message);
+  else if(action=="HISTORY")    HistoryInfo(incomingMessage);
+  else if(action=="TRADE")      TradingModule(incomingMessage);
+  else if(action=="POSITIONS")  GetPositions(incomingMessage);
+  else if(action=="ORDERS")     GetOrders(incomingMessage);
   else if(action=="RESET")      ResetSubscriptionsAndIndicators();
-  else if(action=="INDICATOR")  IndicatorControl(message);
-  else if(action=="CHART")      ChartControl(message);
+  else if(action=="INDICATOR")  IndicatorControl(incomingMessage);
+  else if(action=="CHART")      ChartControl(incomingMessage);
   // Action command error processing
-  else ActionDoneOrError(65538, __FUNCTION__);
+  //else ActionDoneOrError(65538, __FUNCTION__);
+  else {
+    mControl.mSetUserError(65538, GetErrorID(65538));
+    CheckError(__FUNCTION__);
+  }
    
 }
   
@@ -452,7 +455,6 @@ void ScriptConfiguration(CJAVal &dataObject){
 
   string symbol=dataObject["symbol"].ToStr();
   string chartTF=dataObject["chartTF"].ToStr();
-  //string actionType=dataObject["actionType"].ToStr();
 
   ArrayResize(symbolSubscriptions, symbolSubscriptionCount+1);
   symbolSubscriptions[symbolSubscriptionCount].symbol = symbol;
@@ -460,25 +462,16 @@ void ScriptConfiguration(CJAVal &dataObject){
   // to initialze with value 0 skips the first price
   symbolSubscriptions[symbolSubscriptionCount].lastBar = 0;
   symbolSubscriptionCount++;
-/*
-  string symbArr[1];
-  symbArr[0]= symbol;
-  
-  if (!HasChartSymbol(symbol, chartTF)) {
-    ArrayInsert(chartSymbols,symbArr,0);
-    ArrayResize(chartSymbolSettings,symbolSubscriptionCount+1);
-    chartSymbolSettings[symbolSubscriptionCount][0]=symbol;
-    chartSymbolSettings[symbolSubscriptionCount][1]=chartTF;
-    // lastBar
-    chartSymbolSettings[symbolSubscriptionCount][2]=0; // to initialze with value 0 skips the first price 
-    symbolSubscriptionCount++;
-  }
-*/
-  
+  /*
   if(SymbolInfoInteger(symbol, SYMBOL_EXIST)){  
     ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
   }
   else ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
+  */
+  mControl.mResetLastError();
+  SymbolInfoString(symbol, SYMBOL_DESCRIPTION);
+  if(!CheckError(__FUNCTION__)) ActionDoneOrError(ERR_SUCCESS, __FUNCTION__, "ERR_SUCCESS");
+  //if(!CheckError(__FUNCTION__, dataSocket)) ActionDoneOrError(ERR_SUCCESS, __FUNCTION__, dataSocket);
 }
 
 //+------------------------------------------------------------------+
@@ -508,9 +501,6 @@ void StartIndicator(CJAVal &dataObject){
   
   indicatorCount++;    
   ArrayResize(indicators,indicatorCount);
-  //ArrayResize(indicatorIds,indicatorCount);
-  //ArrayResize(indicatorParamCount,indicatorCount);
-  //ArrayResize(indicatorBufferCount,indicatorCount);
   
   int idx = indicatorCount-1;
   
@@ -566,20 +556,32 @@ void StartIndicator(CJAVal &dataObject){
         // TODO error handling
         break;
   }
-    
-
+  
   CJAVal message;
-  message["id"] = (string) id;
-              
-  string t=message.Serialize();
-  if(debug) Print(t);
-  InformClientSocket(indicatorDataSocket,t);
+  if(mControl.mGetLastError()) 
+    {
+      string desc = mControl.mGetDesc();
+      int lastError = mControl.mGetLastError();
+      mControl.Check();
 
-  // TODO more error handling
-  //if(SymbolInfoInteger(symbol, SYMBOL_EXIST)){  
-  //  ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
-  //}
-  //else ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
+      message["error"]=(bool) true;
+      message["lastError"]=(string) lastError;
+      message["description"]=desc;
+      message["function"]=(string) __FUNCTION__;
+      string t=message.Serialize();
+      if(debug) Print(t);
+      InformClientSocket(indicatorDataSocket,t);
+    }
+  else
+    {
+      message["error"]=(bool) false;
+      message["id"] = (string) id;
+                  
+      string t=message.Serialize();
+      if(debug) Print(t);
+      InformClientSocket(indicatorDataSocket,t);
+    }
+
 }
 
 //+------------------------------------------------------------------+
@@ -596,7 +598,7 @@ void GetIndicatorResult(CJAVal &dataObject) {
   int idx = GetIndicatorIdxByIndicatorId(id);
   
   double values[2];
-  ArrayResize(values, indicators[idx].indicatorBufferCount);
+
   CJAVal results;
   // Cycle through all avaliable buffer positions
   for(int i=0;i<indicators[idx].indicatorBufferCount;i++){
@@ -604,16 +606,29 @@ void GetIndicatorResult(CJAVal &dataObject) {
     values[1] = 0.0;
     results[i] = 0.0;
     if(idx >= 0) {
-      if(CopyBuffer(indicators[idx].indicatorHandle, i, fromDate, 1, values) < 0) {/* Error handling */}
+      if(CopyBuffer(indicators[idx].indicatorHandle, i, fromDate, 1, values) < 0) {
+        if(mControl.mGetLastError()) 
+          {
+            CJAVal message;
+            string desc = mControl.mGetDesc();
+            int lastError = mControl.mGetLastError();
+            mControl.Check();
+
+            message["error"]=(bool) true;
+            message["lastError"]=(string) lastError;
+            message["description"]=desc;
+            message["function"]=(string) __FUNCTION__;
+            string t=message.Serialize();
+            if(debug) Print(t);
+            InformClientSocket(indicatorDataSocket,t);
+          }
+      }
       results[i] = DoubleToString(values[0]);
-    }
-    else {
-      // TODO error handling
     }
   }
 
-
   CJAVal message;
+  message["error"]=(bool) false;
   message["id"] = (string) id;
   message["data"].Set(results);
               
@@ -621,11 +636,6 @@ void GetIndicatorResult(CJAVal &dataObject) {
   if(debug) Print(t);
   InformClientSocket(indicatorDataSocket,t);
 
-  // TODO more error handling
-  //if(SymbolInfoInteger(symbol, SYMBOL_EXIST)){  
-  //  ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
-  //}
-  //else ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
 }
 
 //+------------------------------------------------------------------+
@@ -655,9 +665,6 @@ void OpenChart(CJAVal &dataObject){
   
   chartWindowCount++;    
   ArrayResize(chartWindows,chartWindowCount);
-  //ArrayResize(chartWindowIds,chartWindowCount);
-  //ArrayResize(chartWindowPeriods,chartWindowCount);
-  // ArrayResize(chartWindowObjects,chartWindowCount);
   
   int idx = chartWindowCount-1;
   
@@ -665,7 +672,6 @@ void OpenChart(CJAVal &dataObject){
 
   ENUM_TIMEFRAMES period = GetTimeframe(chartTF);
   chartWindows[idx].id = ChartOpen(symbol, period);
-  //chartWindowPeriods[idx] = period;
   
   CJAVal message;
   message["chartId"] = (string) chartId;
@@ -694,17 +700,18 @@ void AddIndicatorChartToChart(CJAVal &dataObject){
 
   double chartIndicatorHandle = iCustom(ChartSymbol(ChartId),ChartPeriod(ChartId),"JsonAPIIndicator",chartIndicatorId,shortname,colorstyle,linetype,linestyle,linewidth);
         
-  ChartIndicatorAdd(ChartId, chartIndicatorSubWindow, chartIndicatorHandle);
-  
-  chartWindows[idx].indicatorId = chartIndicatorId;
-  chartWindows[idx].indicatorHandle = chartIndicatorHandle;
-  
-  CJAVal message;
-  message["chartId"] = (string) chartIdStr;
-              
-  string t=message.Serialize();
-  if(debug) Print(t);
-  InformClientSocket(dataSocket,t);
+  if(ChartIndicatorAdd(ChartId, chartIndicatorSubWindow, chartIndicatorHandle)){
+    chartWindows[idx].indicatorId = chartIndicatorId;
+    chartWindows[idx].indicatorHandle = chartIndicatorHandle;
+  }
+  if(!CheckError(__FUNCTION__)) {
+    CJAVal message;
+    message["chartId"] = (string) chartIdStr;
+                
+    string t=message.Serialize();
+    if(debug) Print(t);
+    InformClientSocket(dataSocket,t);
+  }
 }
 
 //+------------------------------------------------------------------+
@@ -943,19 +950,22 @@ void HistoryInfo(CJAVal &dataObject){
     ulong toDateM = StringToTime(toDate);
    
     tickCount=CopyTicksRange(symbol,tickArray,COPY_TICKS_ALL,1000*(ulong)fromDateM,1000*(ulong)toDateM);
-    if(tickCount){  
-      ActionDoneOrError(ERR_SUCCESS  , __FUNCTION__);  
+    if(tickCount < 0) {
+      mControl.mSetUserError(65541, GetErrorID(65541));
     }
-    else ActionDoneOrError(65541 , __FUNCTION__);
+    CheckError(__FUNCTION__);
     
     Print("Preparing data of ", tickCount, " ticks for ", symbol);
     int file_handle=FileOpen(outputFile, FILE_WRITE | FILE_CSV);
     if(file_handle!=INVALID_HANDLE){
-        msg["status"] = (string) "CONNECTED";
-        msg["type"] = (string) "NORMAL";
-        msg["data"] = (string) StringFormat("Writing to: %s\\%s", TerminalInfoString(TERMINAL_DATA_PATH), outputFile);
-        if(liveStream) InformClientSocket(liveSocket, msg.Serialize());
-      ActionDoneOrError(ERR_SUCCESS  , __FUNCTION__);  
+      msg["status"] = (string) "CONNECTED";
+      msg["type"] = (string) "NORMAL";
+      msg["data"] = (string) StringFormat("Writing to: %s\\%s", TerminalInfoString(TERMINAL_DATA_PATH), outputFile);
+      if(liveStream) InformClientSocket(liveSocket, msg.Serialize());
+      ActionDoneOrError(ERR_SUCCESS  , __FUNCTION__, "ERR_SUCCESS");
+      //ActionDoneOrError(ERR_SUCCESS  , __FUNCTION__, dataSocket);  
+      // Inform client that file is avalable for writing
+
       PrintFormat("%s file is available for writing",fileName);
       PrintFormat("File path: %s\\Files\\",TerminalInfoString(TERMINAL_DATA_PATH));
       //--- write the time and values of signals to the file
@@ -975,9 +985,12 @@ void HistoryInfo(CJAVal &dataObject){
       if(liveStream) InformClientSocket(liveSocket, msg.Serialize());
 
     }
-    else{ 
-      PrintFormat("Failed to open %s file, Error code = %d",fileName,GetLastError());
-      ActionDoneOrError(65542 , __FUNCTION__);
+    else{
+      // File is not available for writing
+      mControl.mSetUserError(65542, GetErrorID(65542));
+      CheckError(__FUNCTION__);
+      //PrintFormat("Failed to open %s file, Error code = %d",fileName,GetLastError());
+      //ActionDoneOrError(65542 , __FUNCTION__);
     }
     connectedFlag=false;
   }
@@ -1005,16 +1018,16 @@ void HistoryInfo(CJAVal &dataObject){
     if(dataObject["toDate"].ToInt()!=NULL)Print("4) Date to:"+TimeToString(toDate));
     
     barCount=CopyRates(symbol,period,fromDate,toDate,r);
-    if(CopySpread(symbol,period, fromDate, toDate, spread)!=1) { /*error processing */ }
-        
-    if(barCount){  
-      ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
+    if(CopySpread(symbol,period, fromDate, toDate, spread)!=1) {
+      mControl.mSetUserError(65541, GetErrorID(65541)); 
+      //CheckError(__FUNCTION__);
     }
-    else ActionDoneOrError(65541, __FUNCTION__);
     
     Print("Preparing tick data of ", barCount, " ticks for ", symbol);
     int file_handle=FileOpen(outputFile, FILE_WRITE | FILE_CSV);
     if(file_handle!=INVALID_HANDLE){
+      ActionDoneOrError(ERR_SUCCESS  , __FUNCTION__, "ERR_SUCCESS");
+      //ActionDoneOrError(ERR_SUCCESS  , __FUNCTION__, dataSocket);
       PrintFormat("%s file is available for writing",outputFile);
       PrintFormat("File path: %s\\Files\\",TerminalInfoString(TERMINAL_DATA_PATH));
       //--- write the time and values of signals to the file
@@ -1025,8 +1038,10 @@ void HistoryInfo(CJAVal &dataObject){
       PrintFormat("Data is written, %s file is closed", outputFile);
     }
     else{ 
-      PrintFormat("Failed to open %s file, Error code = %d",outputFile,GetLastError());
-      ActionDoneOrError(65542 , __FUNCTION__);
+      //PrintFormat("Failed to open %s file, Error code = %d",outputFile,GetLastError());
+      //ActionDoneOrError(65542 , __FUNCTION__);
+      mControl.mSetUserError(65542, GetErrorID(65542));
+      CheckError(__FUNCTION__);
     }
   }
    
@@ -1091,7 +1106,7 @@ void HistoryInfo(CJAVal &dataObject){
     }
     
     barCount=CopyRates(symbol, period, fromDate, toDate, r);
-    if(CopySpread(symbol,period, fromDate, toDate, spread)!=1) { /*error processing */ }
+    if(CopySpread(symbol,period, fromDate, toDate, spread)!=1) { /*mControl.Check();*/ }
     
     if(barCount){
       for(int i=0;i<barCount;i++){
@@ -1145,7 +1160,11 @@ void HistoryInfo(CJAVal &dataObject){
     InformClientSocket(dataSocket,t);
   }
   // Error wrong action type
-  else ActionDoneOrError(65538, __FUNCTION__);
+  //else ActionDoneOrError(65538, __FUNCTION__);
+  else  { 
+    mControl.mSetUserError(65538, GetErrorID(65538)); 
+    CheckError(__FUNCTION__);
+  }
 }
 
 //+------------------------------------------------------------------+
@@ -1161,7 +1180,8 @@ void GetPositions(CJAVal &dataObject){
   if(!positionsTotal) data["positions"].Add(position);
   // Go through positions in a loop
   for(int i=0;i<positionsTotal;i++){
-    ResetLastError();
+    //ResetLastError();
+    mControl.mResetLastError();
     
     if(myposition.Select(PositionGetSymbol(i))){
       position["id"]=PositionGetInteger(POSITION_IDENTIFIER);
@@ -1178,7 +1198,8 @@ void GetPositions(CJAVal &dataObject){
       data["positions"].Add(position);
     }
       // Error handling    
-    else ActionDoneOrError(ERR_TRADE_POSITION_NOT_FOUND, __FUNCTION__);
+    //else ActionDoneOrError(ERR_TRADE_POSITION_NOT_FOUND, __FUNCTION__);
+      CheckError(__FUNCTION__);
   }
   
   string t=data.Serialize();
@@ -1190,7 +1211,8 @@ void GetPositions(CJAVal &dataObject){
 //| Fetch orders information                                         |
 //+------------------------------------------------------------------+
 void GetOrders(CJAVal &dataObject){
-  ResetLastError();
+  //ResetLastError();
+  mControl.mResetLastError();
   
   COrderInfo myorder;
   CJAVal data, order;
@@ -1217,7 +1239,8 @@ void GetOrders(CJAVal &dataObject){
         data["orders"].Add(order);
       } 
       // Error handling   
-      else ActionDoneOrError(ERR_TRADE_ORDER_NOT_FOUND,  __FUNCTION__);
+      //else ActionDoneOrError(ERR_TRADE_ORDER_NOT_FOUND,  __FUNCTION__);
+      CheckError(__FUNCTION__);
     }
   }
     
@@ -1225,48 +1248,21 @@ void GetOrders(CJAVal &dataObject){
   if(debug) Print(t);
   InformClientSocket(dataSocket,t);
 }
-
-//+------------------------------------------------------------------+
-//| Clear symbol subscriptions and indicators                        |
-//+------------------------------------------------------------------+
-
-void ResetSubscriptionsAndIndicators(){
-
-   ArrayFree(symbolSubscriptions);
-   //ArrayFree(chartSymbolSettings);
-   symbolSubscriptionCount=0;
-   
-   bool error = false;
-   for(int i=0;i<indicatorCount;i++){
-    if(!IndicatorRelease(indicators[i].indicatorHandle)) error = true;
-   }
-   ArrayFree(indicators);
-   //ArrayFree(indicatorIds);
-   indicatorCount = 0;
-   
-   for(int i=0;i<ArraySize(chartWindows);i++){
-    if(!IndicatorRelease(chartWindows[i].indicatorHandle)) error = true;
-    ChartClose(chartWindows[i].id);
-   }
-   
-   if(ArraySize(symbolSubscriptions)!=0 || ArraySize(indicators)!=0 || ArraySize(chartWindows)!=0 || error){
-   // TODO Implement propery error codes and descriptions
-   ActionDoneOrError(GetLastError(),  __FUNCTION__);
-   }
-   else ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
-}
   
 //+------------------------------------------------------------------+
 //| Trading module                                                   |
 //+------------------------------------------------------------------+
 void TradingModule(CJAVal &dataObject){
-  ResetLastError();
+  //ResetLastError();
+  mControl.mResetLastError();
   CTrade trade;
   
   string   actionType = dataObject["actionType"].ToStr();
   string   symbol=dataObject["symbol"].ToStr();
   // Check if symbol is the same
-  if(!(symbol==_Symbol)) ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
+  // if(!(symbol==_Symbol)) ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
+  SymbolInfoString(symbol, SYMBOL_DESCRIPTION);
+  CheckError(__FUNCTION__);
   
   int      idNimber=dataObject["id"].ToInt();
   double   volume=dataObject["volume"].ToDbl();
@@ -1369,7 +1365,11 @@ void TradingModule(CJAVal &dataObject){
     }
   }
   // Action type dosen't exist
-  else ActionDoneOrError(65538, __FUNCTION__);
+  //else ActionDoneOrError(65538, __FUNCTION__);
+  else {
+    mControl.mSetUserError(65538, GetErrorID(65538));
+    CheckError(__FUNCTION__);
+  }
   
   // This part of the code runs if order was not completed
   OrderDoneOrError(true, __FUNCTION__, trade);
@@ -1478,10 +1478,45 @@ void OrderDoneOrError(bool error, string funcName, CTrade &trade){
   InformClientSocket(dataSocket,t);
 }
 
+
+//+------------------------------------------------------------------+
+//| Error reporting                                                  |
+//+------------------------------------------------------------------+
+bool CheckError(string funcName) {
+  //string desc = "OK";
+  int lastError = ERR_SUCCESS;
+  if(mControl.mGetLastError()) 
+    {
+      string desc = mControl.mGetDesc();
+      lastError = mControl.mGetLastError();
+      if(debug) Print("Error handling source: ", funcName ," description: ", desc);
+      Print("Error handling source: ", funcName ," description: ", desc);
+      mControl.Check();
+      ActionDoneOrError(lastError, funcName, desc);
+      //ActionDoneOrError(lastError, __FUNCTION__, socket, desc)
+    }
+  if(lastError==0)
+    return false;
+  else
+    return true;
+  //Print("lasterror", lastError);
+  //return lastError;
+
+/*
+  else
+    {
+      mControl.Check();
+      ActionDoneOrError(ERR_SUCCESS, callingFunction);
+      //ActionDoneOrError(lastError, __FUNCTION__, socket, desc);
+    }
+*/
+
+}
+
 //+------------------------------------------------------------------+
 //| Action confirmation                                              |
 //+------------------------------------------------------------------+
-void ActionDoneOrError(int lastError, string funcName){
+void ActionDoneOrError(int lastError, string funcName, string desc){
   
   CJAVal conf;
   
@@ -1489,12 +1524,16 @@ void ActionDoneOrError(int lastError, string funcName){
   if(lastError==0) conf["error"]=(bool)false;
   
   conf["lastError"]=(string) lastError;
-  conf["description"]=GetErrorID(lastError);
+  //conf["lastError"]=(int) lastError;
+  //conf["description"]=GetErrorID(lastError);
+  conf["description"]=(string) desc;
   conf["function"]=(string) funcName;
   
   string t=conf.Serialize();
   if(debug) Print(t);
   InformClientSocket(dataSocket,t);
+  //InformClientSocket(socket,t);
+  
 }
 
 //+------------------------------------------------------------------+
@@ -1503,9 +1542,42 @@ void ActionDoneOrError(int lastError, string funcName){
 void InformClientSocket(Socket &workingSocket,string replyMessage){  
   
   // non-blocking
-  workingSocket.send(replyMessage,true);   
+  workingSocket.send(replyMessage,true);
   // TODO: Array out of range error
-  ResetLastError();                                
+  //ResetLastError();  
+  mControl.mResetLastError();
+  //mControl.Check();                            
+}
+
+//+------------------------------------------------------------------+
+//| Clear symbol subscriptions and indicators                        |
+//+------------------------------------------------------------------+
+void ResetSubscriptionsAndIndicators(){
+
+   ArrayFree(symbolSubscriptions);
+   symbolSubscriptionCount=0;
+   
+   bool error = false;
+   for(int i=0;i<indicatorCount;i++){
+    if(!IndicatorRelease(indicators[i].indicatorHandle)) error = true;
+   }
+   ArrayFree(indicators);
+   indicatorCount = 0;
+   
+   for(int i=0;i<ArraySize(chartWindows);i++){
+    // TODO check if chart exists first: if(ChartGetInteger...
+    if(!IndicatorRelease(chartWindows[i].indicatorHandle)) error = true;
+    ChartClose(chartWindows[i].id);
+   }
+   ArrayFree(chartWindows);
+
+   if(ArraySize(symbolSubscriptions)!=0 || ArraySize(indicators)!=0 || ArraySize(chartWindows)!=0 || error){
+     // Only Alert. Fails too often, this happens when i.e. the backtrader script gets aborted unexpectedly
+     // mControl.Check();
+     // mControl.mSetUserError(65540, GetErrorID(65540));
+     //CheckError(__FUNCTION__);
+   }
+   ActionDoneOrError(ERR_SUCCESS, __FUNCTION__, "ERR_SUCCESS");
 }
 
 //+------------------------------------------------------------------+
@@ -1517,7 +1589,7 @@ string GetRetcodeID(int retcode){
     case 10004: return("TRADE_RETCODE_REQUOTE");             break; 
     case 10006: return("TRADE_RETCODE_REJECT");              break; 
     case 10007: return("TRADE_RETCODE_CANCEL");              break; 
-    case 10008: return("TRADE_RETCODE_PLACED");              break; 
+    case 10008: return("TRADE_RETCODE_PLACED");              break;
     case 10009: return("TRADE_RETCODE_DONE");                break; 
     case 10010: return("TRADE_RETCODE_DONE_PARTIAL");        break; 
     case 10011: return("TRADE_RETCODE_ERROR");               break; 
@@ -1566,19 +1638,21 @@ string GetRetcodeID(int retcode){
 string GetErrorID(int error){
 
   switch(error){ 
+    /*
     case 0:     return("ERR_SUCCESS");                        break; 
     case 4301:  return("ERR_MARKET_UNKNOWN_SYMBOL");          break;  
     case 4303:  return("ERR_MARKET_WRONG_PROPERTY");          break;
     case 4752:  return("ERR_TRADE_DISABLED");                 break;
     case 4753:  return("ERR_TRADE_POSITION_NOT_FOUND");       break;
-    case 4754:  return("ERR_TRADE_ORDER_NOT_FOUND");          break; 
+    case 4754:  return("ERR_TRADE_ORDER_NOT_FOUND");          break;
+    */
     // Custom errors
     case 65537: return("ERR_DESERIALIZATION");                break;
     case 65538: return("ERR_WRONG_ACTION");                   break;
     case 65539: return("ERR_WRONG_ACTION_TYPE");              break;
-    //case 65540: return("ERR_CLEAR_SUBSCRIPTIONS_FAILED");     break;
+    case 65540: return("ERR_CLEAR_SUBSCRIPTIONS_FAILED");     break;
     case 65541: return("ERR_RETRIEVE_DATA_FAILED");     break;
-    case 65542: return("ERR_CFILE_CREATION_FAILED");     break;
+    case 65542: return("ERR_CVS_FILE_CREATION_FAILED");     break;
     
     
     default: 
