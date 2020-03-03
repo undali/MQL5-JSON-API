@@ -44,9 +44,9 @@ int SYS_PORT=15555;
 int DATA_PORT=15556;
 int LIVE_PORT=15557;
 int STR_PORT=15558;
-int IND_DATA_PORT=15559;
-int CHART_LIVE_PORT=15560;
-int PUB_CHART_LIVE_PORT=15562;
+int INDICATOR_DATA_PORT=15559;
+int CHART_DATA_PORT=15560;
+int CHART_INDICATOR_PORT=15562;
 
 // ZeroMQ Cnnections
 Context context("MQL5 JSON API");
@@ -55,15 +55,15 @@ Socket dataSocket(context,ZMQ_PUSH);
 Socket liveSocket(context,ZMQ_PUSH);
 Socket streamSocket(context,ZMQ_PUSH);
 Socket indicatorDataSocket(context,ZMQ_PUSH);
-Socket chartLiveSocket(context,ZMQ_PULL);
-Socket pubChartLiveSocket(context,ZMQ_PUB);
+Socket chartDataSocket(context,ZMQ_PULL);
+Socket chartIndicatorSocket(context,ZMQ_PUB);
 
-// Global variables
+// Global variables \\
 bool debug = false;
 bool liveStream = true;
-bool connectedFlag= true;
+bool connectedFlag = true;
 int deInitReason = -1;
-double chartAttached = ChartID();
+double chartAttached = ChartID(); // Chart id where the expert is attached to
 
 // Variables for handling price data stream
 struct SymbolSubscription {
@@ -76,29 +76,30 @@ int symbolSubscriptionCount = 0;
 
 // Variables for controlling indicators
 struct Indicator {
-  long id;
-  string indicatorId;
-  int indicatorHandle;
-  int indicatorParamCount;
-  int indicatorBufferCount;
+  long id; // Internal id
+  string indicatorId; // UUID
+  int indicatorHandle; // Internal id/handle
+  int indicatorParamCount; // Number of parameters to be passed to the indicator
+  int indicatorBufferCount; // Numnber of buffers to be returned bythe indicator
 };
 Indicator indicators[];
 int indicatorCount = 0;
 
 // Variables for controlling chart
 struct ChartWindow {
-  long id;
-  string chartId;
-  string indicatorId;
-  int indicatorHandle;
+  long id; // Internal id
+  string chartId; // UUID
+  string indicatorId; // UUID
+  int indicatorHandle; // Internal id/handle
 };
 ChartWindow chartWindows[];
 int chartWindowCount = 0;
 
-// Refresh chart windows interval. OnTimer function of indicatore JsonAPIIndicator gets triggered on each interval
-int chartWindowTimerInterval = 100;
-int chartWindowTimerCounter = 0;
+// Refresh chart window interval for JsonAPIIndicator
+int chartWindowTimerInterval = 100; // Cycles of the globally set EventSetMillisecondTimer interval
+int chartWindowTimerCounter = 0; // Keeps track of the current cycle
 
+// Error handling
 ControlErrors mControl;
 
 //string chartWindowObjects[];
@@ -119,20 +120,20 @@ bool BindSockets(){
   if (result == false) { return result; } else {Print("Bound 'Live' socket on port ", LIVE_PORT);}
   result = streamSocket.bind(StringFormat("tcp://%s:%d", HOST,STR_PORT));
   if (result == false) { return result; } else {Print("Bound 'Streaming' socket on port ", STR_PORT);}
-  result = indicatorDataSocket.bind(StringFormat("tcp://%s:%d", HOST,IND_DATA_PORT));
-  if (result == false) { return result; } else {Print("Bound 'Indicator Data' socket on port ", IND_DATA_PORT);}
-  result = chartLiveSocket.bind(StringFormat("tcp://%s:%d", HOST,CHART_LIVE_PORT));
-  if (result == false) { return result; } else {Print("Bound 'Chart Live' socket on port ", CHART_LIVE_PORT);}
-  result = pubChartLiveSocket.bind(StringFormat("tcp://%s:%d", HOST,PUB_CHART_LIVE_PORT));
-  if (result == false) { return result; } else {Print("Bound 'PUB Chart Live' socket on port ", PUB_CHART_LIVE_PORT);}
+  result = indicatorDataSocket.bind(StringFormat("tcp://%s:%d", HOST,INDICATOR_DATA_PORT));
+  if (result == false) { return result; } else {Print("Bound 'Indicator Data' socket on port ", INDICATOR_DATA_PORT);}
+  result = chartDataSocket.bind(StringFormat("tcp://%s:%d", HOST,CHART_DATA_PORT));
+  if (result == false) { return result; } else {Print("Bound 'Chart Data' socket on port ", CHART_DATA_PORT);}
+  result = chartIndicatorSocket.bind(StringFormat("tcp://%s:%d", HOST,CHART_INDICATOR_PORT));
+  if (result == false) { return result; } else {Print("Bound 'JsonAPIIndicator Data' socket on port ", CHART_INDICATOR_PORT);}
     
   sysSocket.setLinger(1000);
   dataSocket.setLinger(1000);
   liveSocket.setLinger(1000);
   streamSocket.setLinger(1000);
   indicatorDataSocket.setLinger(1000);
-  chartLiveSocket.setLinger(1000);
-  pubChartLiveSocket.setLinger(1000);
+  chartDataSocket.setLinger(1000);
+  chartIndicatorSocket.setLinger(1000);
     
   // Number of messages to buffer in RAM.
   sysSocket.setSendHighWaterMark(1);
@@ -140,8 +141,8 @@ bool BindSockets(){
   liveSocket.setSendHighWaterMark(1);
   streamSocket.setSendHighWaterMark(50);
   indicatorDataSocket.setSendHighWaterMark(5);
-  chartLiveSocket.setReceiveHighWaterMark(1); // TODO confirm settings
-  pubChartLiveSocket.setReceiveHighWaterMark(1);
+  chartDataSocket.setReceiveHighWaterMark(1); // TODO confirm settings
+  chartIndicatorSocket.setReceiveHighWaterMark(1);
 
   return result;
 }
@@ -201,18 +202,18 @@ void OnDeinit(const int reason){
   if (reason != REASON_CHARTCHANGE){
       Print(__FUNCTION__," Deinitialization reason: ", getUninitReasonText(reason));
       
-      Print("Unbinding 'System' socket on port ", SYS_PORT,"..");
-      sysSocket.unbind(StringFormat("tcp://%s:%d", HOST,SYS_PORT));
-      Print("Unbinding 'Data' socket on port ", DATA_PORT,"..");
-      dataSocket.unbind(StringFormat("tcp://%s:%d", HOST,DATA_PORT));
+      Print("Unbinding 'System' socket on port ", SYS_PORT, "..");
+      sysSocket.unbind(StringFormat("tcp://%s:%d", HOST, SYS_PORT));
+      Print("Unbinding 'Data' socket on port ", DATA_PORT, "..");
+      dataSocket.unbind(StringFormat("tcp://%s:%d", HOST, DATA_PORT));
       Print("Unbinding 'Live' socket on port ", LIVE_PORT, "..");
-      liveSocket.unbind(StringFormat("tcp://%s:%d", HOST,LIVE_PORT));
+      liveSocket.unbind(StringFormat("tcp://%s:%d", HOST, LIVE_PORT));
       Print("Unbinding 'Streaming' socket on port ", STR_PORT, "..");
-      streamSocket.unbind(StringFormat("tcp://%s:%d", HOST,STR_PORT));
-      Print("Unbinding 'CHart' socket on port ", STR_PORT, "..");
-      streamSocket.unbind(StringFormat("tcp://%s:%d", HOST,CHART_LIVE_PORT));
-      Print("Unbinding 'pub chart' socket on port ", STR_PORT, "..");
-      streamSocket.unbind(StringFormat("tcp://%s:%d", HOST,PUB_CHART_LIVE_PORT));
+      streamSocket.unbind(StringFormat("tcp://%s:%d", HOST, STR_PORT));
+      Print("Unbinding 'Chart Data' socket on port ", STR_PORT, "..");
+      streamSocket.unbind(StringFormat("tcp://%s:%d", HOST, CHART_DATA_PORT));
+      Print("Unbinding 'JsonAPIIndicator Data' socket on port ", STR_PORT, "..");
+      streamSocket.unbind(StringFormat("tcp://%s:%d", HOST, CHART_INDICATOR_PORT));
       
       // Shutdown ZeroMQ Context
       context.shutdown();
@@ -374,11 +375,11 @@ void OnTimer(){
  
   // Publish indicator values for the JsonAPIIndicator indicator
   ZmqMsg chartMsg;
-  chartLiveSocket.recv(chartMsg, true);
+  chartDataSocket.recv(chartMsg, true);
   if(chartMsg.size()>0){
     Print(chartMsg.getData());
-    pubChartLiveSocket.send(chartMsg,true);
-  ResetLastError();  
+    chartIndicatorSocket.send(chartMsg,true);
+  //ResetLastError();  
   }
   
   // Trigger the indicator JsonAPIIndicator to check for new Messages
@@ -674,6 +675,7 @@ void OpenChart(CJAVal &dataObject){
   chartWindows[idx].id = ChartOpen(symbol, period);
   
   CJAVal message;
+  message["error"]=(bool) false;
   message["chartId"] = (string) chartId;
               
   string t=message.Serialize();
@@ -682,7 +684,7 @@ void OpenChart(CJAVal &dataObject){
 }
 
 //+------------------------------------------------------------------+
-//| Add JsonAPIIndicator indicator chart to chart                    |
+//| Add JsonAPIIndicator indicator to chart                          |
 //+------------------------------------------------------------------+
 void AddIndicatorChartToChart(CJAVal &dataObject){
 
@@ -706,6 +708,7 @@ void AddIndicatorChartToChart(CJAVal &dataObject){
   }
   if(!CheckError(__FUNCTION__)) {
     CJAVal message;
+    message["error"]=(bool) false;
     message["chartId"] = (string) chartIdStr;
                 
     string t=message.Serialize();
@@ -717,7 +720,7 @@ void AddIndicatorChartToChart(CJAVal &dataObject){
 //+------------------------------------------------------------------+
 //| Draw on chart                                                    |
 //+------------------------------------------------------------------+
-void ChartDraw(CJAVal &dataObject){
+void ChartDrawY(CJAVal &dataObject){
 /*
   Print("drawchart");
 
@@ -864,6 +867,86 @@ void ChartDrawX(CJAVal &dataObject){
     */
    //ChartSetSymbolPeriod(ChartID(), Symbol(),PERIOD_M5);
    //ChartRedraw(chart_id);
+}
+
+//+------------------------------------------------------------------+
+//| Draw on chart                                                    |
+//+------------------------------------------------------------------+
+void ChartDraw(CJAVal &dataObject){
+
+  // DONT DRAW, if chartid noes not exist any more
+
+  string id=dataObject["id"].ToStr();
+
+  string graphicsType=dataObject["data"]["graphicstype"].ToStr();
+  
+  if (graphicsType=="line") {
+    string objectId=dataObject["data"]["objectId"].ToStr();
+    datetime fromDate=dataObject["data"]["fromDate"].ToInt();
+    datetime toDate=dataObject["data"]["toDate"].ToInt(); 
+    double fromPrice=dataObject["data"]["fromPrice"].ToDbl();
+    double toPrice=dataObject["data"]["toPrice"].ToDbl();
+
+
+  /*
+  double params[];
+  for(int i=0;i<dataObject["params"].Size();i++){
+    ArrayResize(params, i+1);
+    params[i] = dataObject["params"][i].ToDbl();
+  }
+  */
+  //int paramColor = dataObject["params"]["color"]
+  
+  int idx = GetChartWindowIdxByChartWindowId(id);
+  
+  //int thisChartWindowObjectsCount =  ArraySize(chartWindowObjects);
+  //ArrayResize(chartWindowObjects, thisChartWindowObjectsCount+1);
+  //chartWindowObjects[thisChartWindowObjectsCount] = objectId; // do I need this for deinit/reset? Probably Closing chart is sufficient
+
+  long chart_id = chartWindows[idx].id;
+  int window = 0;
+  //CChartObject object;
+  //bool success = ObjectCreate(chart_id,objectId,OBJ_TREND,window,fromDate,fromPrice,toDate,toPrice); // add color param
+  // ChartRedraw(chart_id);
+ 
+  
+  }
+  
+  // datetime time1 = 1581891300;
+  // double price1 = 1.08346;
+  // datetime time2 = 1581891600;
+  // double price2 = 1.08354;
+  
+  //chart_id = ChartOpen("EURUSD",PERIOD_M5);
+  //Print(chart_id);
+  /*
+  bool CChartObjectTrend::Create(long chart_id,string name,int window,
+                                   datetime time1,double price1,datetime time2,double price2)
+  {
+   bool result=ObjectCreate(chart_id,name,OBJ_TREND,window,time1,price1,time2,price2);
+   if(result) result&=Attach(chart_id,name,window,2);
+//---
+   return(result);
+  }
+  */
+     // CChartObject object;
+     //ObjectCreate(chart_id,"ellipse",OBJ_ELLIPSE,window,time1,price1,time2,price2,time2,price2+0.00005);
+     //ObjectCreate(chart_id,"ellipse",OBJ_ELLIPSE,window,time1-100,price1,time1,price1+0.00010,time1+200,price1);
+     //ObjectCreate(chart_id,"trend",OBJ_TREND,window,time1,price1,time2,price2);
+     // ObjectCreate(chart_id,"reactangle",OBJ_TREND,window,time1,price1+0.00010,time2,price2+0.00020);
+
+
+   //--- attach chart object  
+   /*
+   if(!object.Attach(ChartID(),"MyObject",0,2)) 
+     { 
+      printf("Object attach error"); 
+
+     }
+    */
+   //ChartSetSymbolPeriod(ChartID(), Symbol(),PERIOD_M5);
+   //ChartRedraw(chart_id);
+
 }
 
 //+------------------------------------------------------------------+

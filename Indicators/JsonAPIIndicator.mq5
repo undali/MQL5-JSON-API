@@ -8,7 +8,7 @@
 #property link      "https://www.guntherschulz.de"
 #property version   "1.00"
 
-#include <StringToEnumInt.mqh>
+#include <EnumStringToInt.mqh>
 #include <Zmq/Zmq.mqh>
 #include <Json.mqh>
 
@@ -18,7 +18,7 @@ int CHART_SUB_PORT=15562;
 
 // ZeroMQ Cnnections
 Context context("MQL5 JSON API");
-Socket chartLiveSocket(context,ZMQ_SUB);
+Socket chartSubscriptionSocket(context,ZMQ_SUB);
 
 //#property indicator_separate_window
 //#property indicator_buffers 1
@@ -52,14 +52,16 @@ bool first = false;
 //+------------------------------------------------------------------+
 int OnInit()
   {
-  bool result = chartLiveSocket.connect(StringFormat("tcp://%s:%d", HOST, CHART_SUB_PORT));
+  bool result = chartSubscriptionSocket.connect(StringFormat("tcp://%s:%d", HOST, CHART_SUB_PORT));
   if (result == false) {Print("Failed to subscrbe on port ", CHART_SUB_PORT);} 
   else {
     Print("Accepting Chart Indicator data on port ", CHART_SUB_PORT);
-    chartLiveSocket.setSubscribe("");
-    chartLiveSocket.setLinger(1000);
+    // TODO subscribe only to own IndicatorId topic
+    // Subscribe to all topics
+    chartSubscriptionSocket.setSubscribe("");
+    chartSubscriptionSocket.setLinger(1000);
     // Number of messages to buffer in RAM.
-    chartLiveSocket.setReceiveHighWaterMark(5); // TODO confirm settings
+    chartSubscriptionSocket.setReceiveHighWaterMark(5); // TODO confirm settings
   }
   
 //--- indicator buffers mapping;
@@ -130,6 +132,9 @@ void SubscriptionHandler(ZmqMsg &chartMsg){
   if(message["indicatorChartId"]==IndicatorId) WriteToBuffer(message);
 }
 
+//+------------------------------------------------------------------+
+//| Update indicator buffer function                                 |
+//+------------------------------------------------------------------+
 void WriteToBuffer(CJAVal &message) {
   int bufferSize = ArraySize(Buffer);
   int messageDataSize = message["data"].Size();
@@ -172,13 +177,16 @@ dependable redraw after calling timer
 
 */
 
+//+------------------------------------------------------------------+
+//| Check for new indicator data function                            |
+//+------------------------------------------------------------------+
 void CheckMessages(){
-  // Timer() works, when the indicator is manually added to a chart, but not with ChartIndicatorAdd()
+  // This is a workaround for Timer(). It is needed, because Timer() works, when the indicator is manually added to a chart, but not with ChartIndicatorAdd()
 
   ZmqMsg chartMsg;
 
   // Recieve chart instructions stream from client via live Chart socket.
-  chartLiveSocket.recv(chartMsg,true);
+  chartSubscriptionSocket.recv(chartMsg,true);
 
   // Request recived
   if(chartMsg.size()>0){ 
@@ -189,6 +197,10 @@ void CheckMessages(){
   }
 }
 
+//+------------------------------------------------------------------+
+//| OnTimer() workaround function                                    |
+//+------------------------------------------------------------------+
+// Gets triggered by the OnTimer() function of the JsonAPI Expert script
 void OnChartEvent(const int id,
                   const long &lparam,
                   const double &dparam,
