@@ -17,7 +17,7 @@ sed -i '1s/^/\xef\xbb\xbf/' ./Indicators/JsonAPIIndicator.clean.mq5
 mv ./Indicators/JsonAPIIndicator.clean.mq5 ./Indicators/JsonAPIIndicator.mq5
 
 # Remove non-printable ASCII characters 
-tr -cd '[:print:]\n\r' < ./Include/EnumStringToInt.mqh > ./Include/EnumStringToInt.clean.mqh
+tr -cd '[:print:]\n\r' < ./Include/StringToEnumInt.mqh > ./Include/StringToEnumInt.clean.mqh
 # Add UTF-8 BOM
-sed -i '1s/^/\xef\xbb\xbf/' ./Include/EnumStringToInt.clean.mqh
-mv ./Include/EnumStringToInt.clean.mqh ./Include/EnumStringToInt.mqh
+sed -i '1s/^/\xef\xbb\xbf/' ./Include/StringToEnumInt.clean.mqh
+mv ./Include/StringToEnumInt.clean.mqh ./Include/StringToEnumInt.mqh

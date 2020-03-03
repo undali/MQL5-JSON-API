@@ -30,7 +30,7 @@
 #include <Trade/Trade.mqh>
 #include <Zmq/Zmq.mqh>
 #include <Json.mqh>
-#include <EnumStringToInt.mqh>
+#include <StringToEnumInt.mqh>
 #include <ControlErrors.mqh>
 //#include <ChartObjects\ChartObject.mqh> 
 //#include<Canvas\Canvas.mqh>
@@ -377,7 +377,7 @@ void OnTimer(){
   ZmqMsg chartMsg;
   chartDataSocket.recv(chartMsg, true);
   if(chartMsg.size()>0){
-    Print(chartMsg.getData());
+    if(debug) Print(chartMsg.getData());
     chartIndicatorSocket.send(chartMsg,true);
   //ResetLastError();  
   }
@@ -489,12 +489,27 @@ void IndicatorControl(CJAVal &dataObject){
     StartIndicator(dataObject);
   }
 }
-  
+
+//+------------------------------------------------------------------+
+//| Check if string is a representation of a number                  |
+//+------------------------------------------------------------------+
+bool IsNumberAsString(string str) {
+  // MQL5 seems to return true if the values are the same, no matter the data type, in this case comparing str and dbl/int. 
+  // (str "2.1" == double 2.1) will return true.
+  double dbl = StringToDouble(str);
+  int integer = StringToInteger(str);
+  // Compaing to both int and double to cover both cases
+  if(str==dbl || str==integer) return true;
+  else return false;
+}
+
 //+------------------------------------------------------------------+
 //| Start new indicator instance                                     |
 //+------------------------------------------------------------------+
 void StartIndicator(CJAVal &dataObject){
 
+  // TODO map Indicators Constants https://www.mql5.com/en/docs/constants/indicatorconstants
+  
   string symbol=dataObject["symbol"].ToStr();
   string chartTF=dataObject["chartTF"].ToStr();
   string id=dataObject["id"].ToStr();
@@ -511,10 +526,16 @@ void StartIndicator(CJAVal &dataObject){
   double params[];
   indicators[idx].indicatorParamCount = dataObject["params"].Size();
   for(int i=0;i<indicators[idx].indicatorParamCount;i++){
+    // TODO test it. Is it ok to pass EnumInts as Doubles for params?
     ArrayResize(params, i+1);
-    params[i] = dataObject["params"][i].ToDbl();
+    string paramStr = dataObject["params"][i].ToStr();
+    if(IsNumberAsString(paramStr)) params[i] = StringToDouble(paramStr);
+    else {
+      params[i] = StringToEnumInt(paramStr);
+      mControl.mResetLastError(); // TODO find where the Error 4003 is craeted in StringToEnumInt
+    }
   }
-  
+
   ENUM_TIMEFRAMES period = GetTimeframe(chartTF);
 
   // Case construct for passing variable parameter count to the iCustom function is used, because MQL5 does not seem to support expanding an array to a function parameter list
@@ -533,7 +554,7 @@ void StartIndicator(CJAVal &dataObject){
         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2]);
         break;
      case 4:
-        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3]);
+        indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3]); 
         break;
      case 5:
         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4]);
@@ -557,12 +578,13 @@ void StartIndicator(CJAVal &dataObject){
         // TODO error handling
         break;
   }
-  
+
   CJAVal message;
+
   if(mControl.mGetLastError()) 
     {
-      string desc = mControl.mGetDesc();
       int lastError = mControl.mGetLastError();
+      string desc = mControl.mGetDesc();
       mControl.Check();
 
       message["error"]=(bool) true;
@@ -590,8 +612,6 @@ void StartIndicator(CJAVal &dataObject){
 //+------------------------------------------------------------------+
 void GetIndicatorResult(CJAVal &dataObject) {
    
-  // TODO map Indicators Constants https://www.mql5.com/en/docs/constants/indicatorconstants
-   
   datetime fromDate=dataObject["fromDate"].ToInt(); 
   string id=dataObject["id"].ToStr();
   string indicatorName=dataObject["indicatorName"].ToStr();
@@ -611,8 +631,8 @@ void GetIndicatorResult(CJAVal &dataObject) {
         if(mControl.mGetLastError()) 
           {
             CJAVal message;
-            string desc = mControl.mGetDesc();
             int lastError = mControl.mGetLastError();
+            string desc = mControl.mGetDesc();
             mControl.Check();
 
             message["error"]=(bool) true;
@@ -648,7 +668,10 @@ void ChartControl(CJAVal &dataObject){
   string actionType=dataObject["actionType"].ToStr();
 
   if(actionType=="ADDINDICATOR") {
-    AddIndicatorChartToChart(dataObject);
+    AddChartIndicator(dataObject);
+  }
+  else if(actionType=="ADDOBJECT") {
+    AddObjectToChart(dataObject);
   }
   else if(actionType=="OPEN") {
     OpenChart(dataObject);
@@ -686,7 +709,7 @@ void OpenChart(CJAVal &dataObject){
 //+------------------------------------------------------------------+
 //| Add JsonAPIIndicator indicator to chart                          |
 //+------------------------------------------------------------------+
-void AddIndicatorChartToChart(CJAVal &dataObject){
+void AddChartIndicator(CJAVal &dataObject){
 
   string chartIdStr=dataObject["chartId"].ToStr();
   string chartIndicatorId=dataObject["indicatorChartId"].ToStr();
@@ -870,9 +893,9 @@ void ChartDrawX(CJAVal &dataObject){
 }
 
 //+------------------------------------------------------------------+
-//| Draw on chart                                                    |
+//| Draw on chart function                                           |
 //+------------------------------------------------------------------+
-void ChartDraw(CJAVal &dataObject){
+void AddObjectToChart(CJAVal &dataObject){
 
   // DONT DRAW, if chartid noes not exist any more
 
@@ -1567,21 +1590,24 @@ void OrderDoneOrError(bool error, string funcName, CTrade &trade){
 //+------------------------------------------------------------------+
 bool CheckError(string funcName) {
   //string desc = "OK";
-  int lastError = ERR_SUCCESS;
-  if(mControl.mGetLastError()) 
+  //int lastError = ERR_SUCCESS;
+  int lastError = mControl.mGetLastError();
+  if(lastError) 
     {
       string desc = mControl.mGetDesc();
-      lastError = mControl.mGetLastError();
+      //lastError = mControl.mGetLastError();
       if(debug) Print("Error handling source: ", funcName ," description: ", desc);
       Print("Error handling source: ", funcName ," description: ", desc);
       mControl.Check();
       ActionDoneOrError(lastError, funcName, desc);
+      return true;
       //ActionDoneOrError(lastError, __FUNCTION__, socket, desc)
     }
-  if(lastError==0)
-    return false;
-  else
-    return true;
+  else return false;
+//  if(lastError==0)
+//    return false;
+//  else
+//    return true;
   //Print("lasterror", lastError);
   //return lastError;
 
