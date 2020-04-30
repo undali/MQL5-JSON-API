@@ -20,3 +20,9 @@ tr -cd '[:print:]\n\r' < ./Include/StringToEnumInt.mqh > ./Include/StringToEnumI
 # Add UTF-8 BOM
 sed -i '1s/^/\xef\xbb\xbf/' ./Include/StringToEnumInt.clean.mqh
 mv ./Include/StringToEnumInt.clean.mqh ./Include/StringToEnumInt.mqh
+
+# Remove non-printable ASCII characters 
+tr -cd '[:print:]\n\r' < ./Include/controlerrors.mqh > ./Include/controlerrors.clean.mqh
+# Add UTF-8 BOM
+sed -i '1s/^/\xef\xbb\xbf/' ./Include/controlerrors.clean.mqh
+mv ./Include/controlerrors.clean.mqh ./Include/controlerrors.mqh
