@@ -1,3 +1,9 @@
+### 30th April 2020
+
+- add support for spreads
+- add support for drawing custom indicator data to charts
+- add support for indicator data output
+
 ### 16th February 2020
 
 - add support for candle ask/bid price spread
