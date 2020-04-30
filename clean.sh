@@ -9,7 +9,6 @@ tr -cd '[:print:]\n\r' < ./Experts/JsonAPI.mq5 > ./Experts/JsonAPI.clean.mq5
 sed -i '1s/^/\xef\xbb\xbf/' ./Experts/JsonAPI.clean.mq5
 mv ./Experts/JsonAPI.clean.mq5 ./Experts/JsonAPI.mq5
 
-
 # Remove non-printable ASCII characters 
 tr -cd '[:print:]\n\r' < ./Indicators/JsonAPIIndicator.mq5 > ./Indicators/JsonAPIIndicator.clean.mq5
 # Add UTF-8 BOM

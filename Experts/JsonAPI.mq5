@@ -102,11 +102,6 @@ int chartWindowTimerCounter = 0; // Keeps track of the current cycle
 // Error handling
 ControlErrors mControl;
 
-//string chartWindowObjects[];
-
-//double chartCurvePositions[][3];
-
-
 //+------------------------------------------------------------------+
 //| Bind ZMQ sockets to ports                                        |
 //+------------------------------------------------------------------+
@@ -152,12 +147,10 @@ bool BindSockets(){
 //+------------------------------------------------------------------+
 int OnInit(){
 
-  // Settimg up error reporting
+  // Setting up error reporting
   mControl.SetAlert(true);
-  //mControl.SetPrint(true);
   mControl.SetSound(false);
   mControl.SetWriteFlag(false);
-  //mControl.SetPlaySoundFile("news.wav");
   
   /* Bindinig ZMQ ports on init */  
   // Skip reloading of the EA script when the reason to reload is a chart timeframe change
@@ -226,12 +219,6 @@ void OnDeinit(const int reason){
   }
 }
 
-/*
-void OnTick(){
- 
-}
-*/
-
 //+------------------------------------------------------------------+
 //| Check if subscribed to symbol and timeframe combination          |
 //+------------------------------------------------------------------+
@@ -296,9 +283,6 @@ void StreamPriceData(){
         MqlRates rates[1];
         int spread[1];
         
-      //if(CopyBuffer(indicators[idx].indicatorHandle, i, fromDate, 1, values) < 0) {
-      //  CheckError(__FUNCTION__, indicatorDataSocket);
-      //}
         if( chartTF == "TICK"){
           if(SymbolInfoTick(symbol,tick) !=true) { /*mControl.Check();*/ }
           thisBar=(datetime) tick.time_msc;
@@ -351,7 +335,6 @@ void StreamPriceData(){
       }
     }
   }
-  // return true;
 }
 
 //+------------------------------------------------------------------+
@@ -378,8 +361,7 @@ void OnTimer(){
   chartDataSocket.recv(chartMsg, true);
   if(chartMsg.size()>0){
     if(debug) Print(chartMsg.getData());
-    chartIndicatorSocket.send(chartMsg,true);
-  //ResetLastError();  
+    chartIndicatorSocket.send(chartMsg,true);  
   }
   
   // Trigger the indicator JsonAPIIndicator to check for new Messages
@@ -408,19 +390,9 @@ void RequestHandler(ZmqMsg &request){
 
   if(debug) Print("Processing:"+msg);
   
-  // Deserialize msg to CJAVal array
-  /*
-  if(!message.Deserialize(msg)){
-    ActionDoneOrError(65537, __FUNCTION__);
-    Alert("Deserialization Error");
-    ExpertRemove();
-  }
-  */
-  
   if(!incomingMessage.Deserialize(msg)){
     mControl.mSetUserError(65537, GetErrorID(65537));
     CheckError(__FUNCTION__);
-    //ExpertRemove();
   }
 
   // Send response to System socket that request was received
@@ -440,8 +412,6 @@ void RequestHandler(ZmqMsg &request){
   else if(action=="RESET")      ResetSubscriptionsAndIndicators();
   else if(action=="INDICATOR")  IndicatorControl(incomingMessage);
   else if(action=="CHART")      ChartControl(incomingMessage);
-  // Action command error processing
-  //else ActionDoneOrError(65538, __FUNCTION__);
   else {
     mControl.mSetUserError(65538, GetErrorID(65538));
     CheckError(__FUNCTION__);
@@ -463,16 +433,10 @@ void ScriptConfiguration(CJAVal &dataObject){
   // to initialze with value 0 skips the first price
   symbolSubscriptions[symbolSubscriptionCount].lastBar = 0;
   symbolSubscriptionCount++;
-  /*
-  if(SymbolInfoInteger(symbol, SYMBOL_EXIST)){  
-    ActionDoneOrError(ERR_SUCCESS, __FUNCTION__);  
-  }
-  else ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
-  */
+
   mControl.mResetLastError();
   SymbolInfoString(symbol, SYMBOL_DESCRIPTION);
   if(!CheckError(__FUNCTION__)) ActionDoneOrError(ERR_SUCCESS, __FUNCTION__, "ERR_SUCCESS");
-  //if(!CheckError(__FUNCTION__, dataSocket)) ActionDoneOrError(ERR_SUCCESS, __FUNCTION__, dataSocket);
 }
 
 //+------------------------------------------------------------------+
@@ -670,9 +634,6 @@ void ChartControl(CJAVal &dataObject){
   if(actionType=="ADDINDICATOR") {
     AddChartIndicator(dataObject);
   }
-  else if(actionType=="ADDOBJECT") {
-    AddObjectToChart(dataObject);
-  }
   else if(actionType=="OPEN") {
     OpenChart(dataObject);
   }
@@ -738,238 +699,6 @@ void AddChartIndicator(CJAVal &dataObject){
     if(debug) Print(t);
     InformClientSocket(dataSocket,t);
   }
-}
-
-//+------------------------------------------------------------------+
-//| Draw on chart                                                    |
-//+------------------------------------------------------------------+
-void ChartDrawY(CJAVal &dataObject){
-/*
-  Print("drawchart");
-
-  string id=dataObject["id"].ToStr();
-  //int windowIdx = GetChartWindowIdxByChartWindowId(id);
-  
-  int datesSize = dataObject["data"][0].Size();
-  int x[];
-  int y[];
-  double x_dbl[];
-  double y_dbl[];
-  ArrayResize(chartCurvePositions, datesSize);
-  ArrayResize(x,datesSize);
-  ArrayResize(y,datesSize);
-  ArrayResize(x_dbl,datesSize);
-  ArrayResize(y_dbl,datesSize);
-  for(int i=0;i<datesSize;i++){
-    chartCurvePositions[i][0] = dataObject["data"][0][i].ToDbl();
-    chartCurvePositions[i][1] = dataObject["data"][1][i].ToDbl();
-    //chartCurvePositions[i][2] = dataObject["data"]["dates"][2].ToDbl();
-
-    //ChartTimePriceToXY(windowIdx, 0, chartCurvePositions[i][0], chartCurvePositions[i][1], x[i], y[i]);
-    //x_dbl[i] = x[i];
-    //y_dbl[i] = y[i];
-  }
-   int firstBarIdx = ChartGetInteger(0,CHART_FIRST_VISIBLE_BAR,0);
-   int lastBarIdx = firstBarIdx + ChartGetInteger(0, CHART_VISIBLE_BARS,0);
-   
-   MqlRates ratesFirst[];
-   MqlRates ratesLast[];
-   CopyRates(Symbol(),PERIOD_M1,firstBarIdx,1, ratesFirst);
-   CopyRates(Symbol(),PERIOD_M1,lastBarIdx,1, ratesLast);
-   //Print(chartCurvePositions[0][0]);
-   int idxStart = ArrayBsearch(chartCurvePositions, ratesFirst[0].time); 
-   int idxEnd = ArrayBsearch(chartCurvePositions, ratesLast[0].time);
-   Print(StringToTime(ratesFirst[0].time));
-   Print(ratesLast[0].time);
-   Print("start ", idxStart, " end ", idxEnd, " r " ,ratesFirst[0].time, " ",ratesLast[0].time, " fidx ", firstBarIdx, " lidx ", lastBarIdx );
-   
-
-   int j = 0;
-   for(int i=idxStart;i<idxEnd;i++){
-    ChartTimePriceToXY(0, 0, chartCurvePositions[i][0], chartCurvePositions[i][1], x[j], y[j]);
-    x_dbl[j] = x[j];
-    y_dbl[j] = y[j];
-    j++; 
-   }
-*/
-
-
-/*
-   //Print("x ",x[0], x_dbl[0]);
-   CGraphic graphic;
-   uint c = ColorToARGB(clrBlue,0x55);
-   int height=ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
-   int width=ChartGetInteger(0,CHART_WIDTH_IN_PIXELS,0);
-   Print("CHART_HEIGHT_IN_PIXELS =",height,"pixels");
-   Print("CHART_WIDTH_IN_PIXELS =",width,"pixels");
-   graphic.Create(0,"Graphic",0,0,0,width,height);
-   graphic.BackgroundColor(clrBlue);
-   Print(graphic.BackgroundColor(), " ", clrBlue);
-   //graphic.Create(0,"Graphic",0,30,30,780,380);
-   double xx_dbl[]={-10,-4,-1,2,3,4,5,6,7,8};
-   double yy_dbl[]={-5,4,-10,23,17,18,-9,13,17,4};
-   CCurve *curve=graphic.CurveAdd(x_dbl,y_dbl,CURVE_LINES,"curveName");
-   graphic.CurvePlotAll();
-   graphic.Update();
-   //curve.Update(x,y);
-   //Print(curve.Name());
-*/
-}
-
-void ChartDrawX(CJAVal &dataObject){
-
-  // DONT DRAW, if chartid noes not exist any more
-
-  string id=dataObject["id"].ToStr();
-
-  string graphicsType=dataObject["data"]["graphicstype"].ToStr();
-  
-  if (graphicsType=="line") {
-    string objectId=dataObject["data"]["objectId"].ToStr();
-    datetime fromDate=dataObject["data"]["fromDate"].ToInt();
-    datetime toDate=dataObject["data"]["toDate"].ToInt(); 
-    double fromPrice=dataObject["data"]["fromPrice"].ToDbl();
-    double toPrice=dataObject["data"]["toPrice"].ToDbl();
-
-
-  /*
-  double params[];
-  for(int i=0;i<dataObject["params"].Size();i++){
-    ArrayResize(params, i+1);
-    params[i] = dataObject["params"][i].ToDbl();
-  }
-  */
-  //int paramColor = dataObject["params"]["color"]
-  
-  int idx = GetChartWindowIdxByChartWindowId(id);
-  
-  //int thisChartWindowObjectsCount =  ArraySize(chartWindowObjects);
-  //ArrayResize(chartWindowObjects, thisChartWindowObjectsCount+1);
-  //chartWindowObjects[thisChartWindowObjectsCount] = objectId; // do I need this for deinit/reset? Probably Closing chart is sufficient
-
-  long chart_id = chartWindows[idx].id;
-  int window = 0;
-  //CChartObject object;
-  //bool success = ObjectCreate(chart_id,objectId,OBJ_TREND,window,fromDate,fromPrice,toDate,toPrice); // add color param
-  // ChartRedraw(chart_id);
- 
-  
-  }
-  
-  // datetime time1 = 1581891300;
-  // double price1 = 1.08346;
-  // datetime time2 = 1581891600;
-  // double price2 = 1.08354;
-  
-  //chart_id = ChartOpen("EURUSD",PERIOD_M5);
-  //Print(chart_id);
-  /*
-  bool CChartObjectTrend::Create(long chart_id,string name,int window,
-                                   datetime time1,double price1,datetime time2,double price2)
-  {
-   bool result=ObjectCreate(chart_id,name,OBJ_TREND,window,time1,price1,time2,price2);
-   if(result) result&=Attach(chart_id,name,window,2);
-//---
-   return(result);
-  }
-  */
-     // CChartObject object;
-     //ObjectCreate(chart_id,"ellipse",OBJ_ELLIPSE,window,time1,price1,time2,price2,time2,price2+0.00005);
-     //ObjectCreate(chart_id,"ellipse",OBJ_ELLIPSE,window,time1-100,price1,time1,price1+0.00010,time1+200,price1);
-     //ObjectCreate(chart_id,"trend",OBJ_TREND,window,time1,price1,time2,price2);
-     // ObjectCreate(chart_id,"reactangle",OBJ_TREND,window,time1,price1+0.00010,time2,price2+0.00020);
-
-
-   //--- attach chart object  
-   /*
-   if(!object.Attach(ChartID(),"MyObject",0,2)) 
-     { 
-      printf("Object attach error"); 
-
-     }
-    */
-   //ChartSetSymbolPeriod(ChartID(), Symbol(),PERIOD_M5);
-   //ChartRedraw(chart_id);
-}
-
-//+------------------------------------------------------------------+
-//| Draw on chart function                                           |
-//+------------------------------------------------------------------+
-void AddObjectToChart(CJAVal &dataObject){
-
-  // DONT DRAW, if chartid noes not exist any more
-
-  string id=dataObject["id"].ToStr();
-
-  string graphicsType=dataObject["data"]["graphicstype"].ToStr();
-  
-  if (graphicsType=="line") {
-    string objectId=dataObject["data"]["objectId"].ToStr();
-    datetime fromDate=dataObject["data"]["fromDate"].ToInt();
-    datetime toDate=dataObject["data"]["toDate"].ToInt(); 
-    double fromPrice=dataObject["data"]["fromPrice"].ToDbl();
-    double toPrice=dataObject["data"]["toPrice"].ToDbl();
-
-
-  /*
-  double params[];
-  for(int i=0;i<dataObject["params"].Size();i++){
-    ArrayResize(params, i+1);
-    params[i] = dataObject["params"][i].ToDbl();
-  }
-  */
-  //int paramColor = dataObject["params"]["color"]
-  
-  int idx = GetChartWindowIdxByChartWindowId(id);
-  
-  //int thisChartWindowObjectsCount =  ArraySize(chartWindowObjects);
-  //ArrayResize(chartWindowObjects, thisChartWindowObjectsCount+1);
-  //chartWindowObjects[thisChartWindowObjectsCount] = objectId; // do I need this for deinit/reset? Probably Closing chart is sufficient
-
-  long chart_id = chartWindows[idx].id;
-  int window = 0;
-  //CChartObject object;
-  //bool success = ObjectCreate(chart_id,objectId,OBJ_TREND,window,fromDate,fromPrice,toDate,toPrice); // add color param
-  // ChartRedraw(chart_id);
- 
-  
-  }
-  
-  // datetime time1 = 1581891300;
-  // double price1 = 1.08346;
-  // datetime time2 = 1581891600;
-  // double price2 = 1.08354;
-  
-  //chart_id = ChartOpen("EURUSD",PERIOD_M5);
-  //Print(chart_id);
-  /*
-  bool CChartObjectTrend::Create(long chart_id,string name,int window,
-                                   datetime time1,double price1,datetime time2,double price2)
-  {
-   bool result=ObjectCreate(chart_id,name,OBJ_TREND,window,time1,price1,time2,price2);
-   if(result) result&=Attach(chart_id,name,window,2);
-//---
-   return(result);
-  }
-  */
-     // CChartObject object;
-     //ObjectCreate(chart_id,"ellipse",OBJ_ELLIPSE,window,time1,price1,time2,price2,time2,price2+0.00005);
-     //ObjectCreate(chart_id,"ellipse",OBJ_ELLIPSE,window,time1-100,price1,time1,price1+0.00010,time1+200,price1);
-     //ObjectCreate(chart_id,"trend",OBJ_TREND,window,time1,price1,time2,price2);
-     // ObjectCreate(chart_id,"reactangle",OBJ_TREND,window,time1,price1+0.00010,time2,price2+0.00020);
-
-
-   //--- attach chart object  
-   /*
-   if(!object.Attach(ChartID(),"MyObject",0,2)) 
-     { 
-      printf("Object attach error"); 
-
-     }
-    */
-   //ChartSetSymbolPeriod(ChartID(), Symbol(),PERIOD_M5);
-   //ChartRedraw(chart_id);
-
 }
 
 //+------------------------------------------------------------------+
@@ -1095,8 +824,6 @@ void HistoryInfo(CJAVal &dataObject){
       // File is not available for writing
       mControl.mSetUserError(65542, GetErrorID(65542));
       CheckError(__FUNCTION__);
-      //PrintFormat("Failed to open %s file, Error code = %d",fileName,GetLastError());
-      //ActionDoneOrError(65542 , __FUNCTION__);
     }
     connectedFlag=false;
   }
@@ -1126,14 +853,12 @@ void HistoryInfo(CJAVal &dataObject){
     barCount=CopyRates(symbol,period,fromDate,toDate,r);
     if(CopySpread(symbol,period, fromDate, toDate, spread)!=1) {
       mControl.mSetUserError(65541, GetErrorID(65541)); 
-      //CheckError(__FUNCTION__);
     }
     
     Print("Preparing tick data of ", barCount, " ticks for ", symbol);
     int file_handle=FileOpen(outputFile, FILE_WRITE | FILE_CSV);
     if(file_handle!=INVALID_HANDLE){
-      ActionDoneOrError(ERR_SUCCESS  , __FUNCTION__, "ERR_SUCCESS");
-      //ActionDoneOrError(ERR_SUCCESS  , __FUNCTION__, dataSocket);
+      ActionDoneOrError(ERR_SUCCESS  , __FUNCTION__, "ERR_SUCCESS");;
       PrintFormat("%s file is available for writing",outputFile);
       PrintFormat("File path: %s\\Files\\",TerminalInfoString(TERMINAL_DATA_PATH));
       //--- write the time and values of signals to the file
@@ -1144,8 +869,6 @@ void HistoryInfo(CJAVal &dataObject){
       PrintFormat("Data is written, %s file is closed", outputFile);
     }
     else{ 
-      //PrintFormat("Failed to open %s file, Error code = %d",outputFile,GetLastError());
-      //ActionDoneOrError(65542 , __FUNCTION__);
       mControl.mSetUserError(65542, GetErrorID(65542));
       CheckError(__FUNCTION__);
     }
@@ -1265,8 +988,6 @@ void HistoryInfo(CJAVal &dataObject){
     if(debug) Print(t);
     InformClientSocket(dataSocket,t);
   }
-  // Error wrong action type
-  //else ActionDoneOrError(65538, __FUNCTION__);
   else  { 
     mControl.mSetUserError(65538, GetErrorID(65538)); 
     CheckError(__FUNCTION__);
@@ -1286,7 +1007,6 @@ void GetPositions(CJAVal &dataObject){
   if(!positionsTotal) data["positions"].Add(position);
   // Go through positions in a loop
   for(int i=0;i<positionsTotal;i++){
-    //ResetLastError();
     mControl.mResetLastError();
     
     if(myposition.Select(PositionGetSymbol(i))){
@@ -1303,8 +1023,6 @@ void GetPositions(CJAVal &dataObject){
       data["error"]=(bool) false;
       data["positions"].Add(position);
     }
-      // Error handling    
-    //else ActionDoneOrError(ERR_TRADE_POSITION_NOT_FOUND, __FUNCTION__);
       CheckError(__FUNCTION__);
   }
   
@@ -1317,7 +1035,6 @@ void GetPositions(CJAVal &dataObject){
 //| Fetch orders information                                         |
 //+------------------------------------------------------------------+
 void GetOrders(CJAVal &dataObject){
-  //ResetLastError();
   mControl.mResetLastError();
   
   COrderInfo myorder;
@@ -1345,7 +1062,6 @@ void GetOrders(CJAVal &dataObject){
         data["orders"].Add(order);
       } 
       // Error handling   
-      //else ActionDoneOrError(ERR_TRADE_ORDER_NOT_FOUND,  __FUNCTION__);
       CheckError(__FUNCTION__);
     }
   }
@@ -1359,14 +1075,11 @@ void GetOrders(CJAVal &dataObject){
 //| Trading module                                                   |
 //+------------------------------------------------------------------+
 void TradingModule(CJAVal &dataObject){
-  //ResetLastError();
   mControl.mResetLastError();
   CTrade trade;
   
   string   actionType = dataObject["actionType"].ToStr();
   string   symbol=dataObject["symbol"].ToStr();
-  // Check if symbol is the same
-  // if(!(symbol==_Symbol)) ActionDoneOrError(ERR_MARKET_UNKNOWN_SYMBOL, __FUNCTION__);
   SymbolInfoString(symbol, SYMBOL_DESCRIPTION);
   CheckError(__FUNCTION__);
   
@@ -1471,7 +1184,6 @@ void TradingModule(CJAVal &dataObject){
     }
   }
   // Action type dosen't exist
-  //else ActionDoneOrError(65538, __FUNCTION__);
   else {
     mControl.mSetUserError(65538, GetErrorID(65538));
     CheckError(__FUNCTION__);
@@ -1490,8 +1202,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    
   ENUM_TRADE_TRANSACTION_TYPE  trans_type=trans.type;
   switch(trans.type) {
-    // case  TRADE_TRANSACTION_POSITION: {}  break;
-    // case  TRADE_TRANSACTION_DEAL_ADD: {}  break;
     case  TRADE_TRANSACTION_REQUEST:{
       CJAVal data, req, res;
       
@@ -1589,36 +1299,17 @@ void OrderDoneOrError(bool error, string funcName, CTrade &trade){
 //| Error reporting                                                  |
 //+------------------------------------------------------------------+
 bool CheckError(string funcName) {
-  //string desc = "OK";
-  //int lastError = ERR_SUCCESS;
   int lastError = mControl.mGetLastError();
   if(lastError) 
     {
       string desc = mControl.mGetDesc();
-      //lastError = mControl.mGetLastError();
       if(debug) Print("Error handling source: ", funcName ," description: ", desc);
       Print("Error handling source: ", funcName ," description: ", desc);
       mControl.Check();
       ActionDoneOrError(lastError, funcName, desc);
       return true;
-      //ActionDoneOrError(lastError, __FUNCTION__, socket, desc)
     }
   else return false;
-//  if(lastError==0)
-//    return false;
-//  else
-//    return true;
-  //Print("lasterror", lastError);
-  //return lastError;
-
-/*
-  else
-    {
-      mControl.Check();
-      ActionDoneOrError(ERR_SUCCESS, callingFunction);
-      //ActionDoneOrError(lastError, __FUNCTION__, socket, desc);
-    }
-*/
 
 }
 
@@ -1633,16 +1324,12 @@ void ActionDoneOrError(int lastError, string funcName, string desc){
   if(lastError==0) conf["error"]=(bool)false;
   
   conf["lastError"]=(string) lastError;
-  //conf["lastError"]=(int) lastError;
-  //conf["description"]=GetErrorID(lastError);
   conf["description"]=(string) desc;
   conf["function"]=(string) funcName;
   
   string t=conf.Serialize();
   if(debug) Print(t);
   InformClientSocket(dataSocket,t);
-  //InformClientSocket(socket,t);
-  
 }
 
 //+------------------------------------------------------------------+
@@ -1652,8 +1339,7 @@ void InformClientSocket(Socket &workingSocket,string replyMessage){
   
   // non-blocking
   workingSocket.send(replyMessage,true);
-  // TODO: Array out of range error
-  //ResetLastError();  
+  // TODO: Array out of range error  
   mControl.mResetLastError();
   //mControl.Check();                            
 }
@@ -1679,13 +1365,15 @@ void ResetSubscriptionsAndIndicators(){
     ChartClose(chartWindows[i].id);
    }
    ArrayFree(chartWindows);
-
+    
+   /* 
    if(ArraySize(symbolSubscriptions)!=0 || ArraySize(indicators)!=0 || ArraySize(chartWindows)!=0 || error){
-     // Only Alert. Fails too often, this happens when i.e. the backtrader script gets aborted unexpectedly
-     // mControl.Check();
-     // mControl.mSetUserError(65540, GetErrorID(65540));
-     //CheckError(__FUNCTION__);
+     // Set to only Alert. Fails too often, this happens when i.e. the backtrader script gets aborted unexpectedly
+     mControl.Check();
+     mControl.mSetUserError(65540, GetErrorID(65540));
+     CheckError(__FUNCTION__);
    }
+   */
    ActionDoneOrError(ERR_SUCCESS, __FUNCTION__, "ERR_SUCCESS");
 }
 
@@ -1760,8 +1448,8 @@ string GetErrorID(int error){
     case 65538: return("ERR_WRONG_ACTION");                   break;
     case 65539: return("ERR_WRONG_ACTION_TYPE");              break;
     case 65540: return("ERR_CLEAR_SUBSCRIPTIONS_FAILED");     break;
-    case 65541: return("ERR_RETRIEVE_DATA_FAILED");     break;
-    case 65542: return("ERR_CVS_FILE_CREATION_FAILED");     break;
+    case 65541: return("ERR_RETRIEVE_DATA_FAILED");           break;
+    case 65542: return("ERR_CVS_FILE_CREATION_FAILED");       break;
     
     
     default: 

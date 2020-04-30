@@ -20,16 +20,6 @@ int CHART_SUB_PORT=15562;
 Context context("MQL5 JSON API");
 Socket chartSubscriptionSocket(context,ZMQ_SUB);
 
-//#property indicator_separate_window
-//#property indicator_buffers 1
-//#property indicator_plots   1
-//---- plot MA
-//#property indicator_label1  "MA"
-//#property indicator_type1   DRAW_LINE
-//#property indicator_color1  clrRed
-//#property indicator_style1  STYLE_SOLID
-//#property indicator_width1  1
-
 //--- input parameters
 input string            IndicatorId="";
 input string            ShortName="JsonAPI";   
@@ -41,11 +31,7 @@ input int               LineWidth = 1;
 //--- indicator settings
 double                   Buffer[];
 bool                     debug = false;
-
 bool first = false;
-
-//double Values[];
-//ENUM_TIMEFRAMES originalTF = ChartPeriod();
 
 //+------------------------------------------------------------------+
 //| Custom indicator initialization function                         |
@@ -103,12 +89,6 @@ int OnCalculate(const int rates_total,
   if(rates_total>prev_calculated){
     Buffer[0] = EMPTY_VALUE;
   }
-  
-/*
-https://www.mql5.com/en/docs/constants/structures/mqlparam
-
-*/
-  
  
 //--- return value of prev_calculated for next call
    return(rates_total);
@@ -116,8 +96,6 @@ https://www.mql5.com/en/docs/constants/structures/mqlparam
 
 void SubscriptionHandler(ZmqMsg &chartMsg){
   CJAVal message;
-        
-  //ResetLastError();
   
   // Get data from reguest
   string msg=chartMsg.getData();
@@ -125,7 +103,6 @@ void SubscriptionHandler(ZmqMsg &chartMsg){
   
   // Deserialize msg to CJAVal array
   if(!message.Deserialize(msg)){
-    //ActionDoneOrError(65537, __FUNCTION__);
     Alert("Deserialization Error");
     ExpertRemove();
   }
@@ -139,7 +116,6 @@ void WriteToBuffer(CJAVal &message) {
   int bufferSize = ArraySize(Buffer);
   int messageDataSize = message["data"].Size();
   if(first==false) {
-    //ArrayFill(Buffer, 0, ArraySize(Buffer), EMPTY_VALUE);
     PlotIndexSetInteger(0,PLOT_DRAW_BEGIN,bufferSize-messageDataSize);
     first = true;
   }
@@ -153,29 +129,8 @@ void WriteToBuffer(CJAVal &message) {
     }
   }
   Buffer[0] = EMPTY_VALUE;
-  
-  
-  
-  //ArrayResize(Values, bufferSize);
- //for(int i=0;i<bufferSize;i++){
- //   Values[i] = Buffer[i];
- // }
- //   Print(Buffer[1], " ", Values[1]);
 }
 
-/*
-
-TODO:
-
-display drawing when the last history price arrived, not on first live signal
-
-buy/sell arrows
-create custom symbols for backtest data
-restore after time frame change. try valuestore again?
-  alternative: set Buffer to all EMPTY_VALUE, if not the original TF
-dependable redraw after calling timer
-
-*/
 
 //+------------------------------------------------------------------+
 //| Check for new indicator data function                            |
@@ -206,7 +161,6 @@ void OnChartEvent(const int id,
                   const double &dparam,
                   const string &sparam)
   {
-    //if(id==CHARTEVENT_CUSTOM+222 && sparam==IndicatorId) CheckMessages();
     if(id==CHARTEVENT_CUSTOM+222) CheckMessages();
   }
 //+----------------------------------------------------
