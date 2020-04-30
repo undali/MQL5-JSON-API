@@ -32,11 +32,6 @@
 #include <Json.mqh>
 #include <StringToEnumInt.mqh>
 #include <ControlErrors.mqh>
-//#include <ChartObjects\ChartObject.mqh> 
-//#include<Canvas\Canvas.mqh>
-//#include <Graphics\Graphic.mqh>
-// Starts an Expert Advisor with specified parameters
-//#include <Expert.mqh>
 
 // Set ports and host for ZeroMQ
 string HOST="*";
@@ -274,7 +269,6 @@ void StreamPriceData(){
         string symbol=symbolSubscriptions[i].symbol;
         string chartTF=symbolSubscriptions[i].chartTf;
         datetime lastBar=symbolSubscriptions[i].lastBar;
-        //Print(symbol," ", chartTF," ",lastBar);
         CJAVal Data;
         ENUM_TIMEFRAMES period = GetTimeframe(chartTF);
         
@@ -676,6 +670,7 @@ void AddChartIndicator(CJAVal &dataObject){
   string chartIndicatorId=dataObject["indicatorChartId"].ToStr();
   int chartIndicatorSubWindow=dataObject["chartIndicatorSubWindow"].ToInt();
   string shortname = dataObject["style"]["shortname"].ToStr();
+  string linelabel = dataObject["style"]["linelabel"].ToStr();
   string colorstyle = dataObject["style"]["color"].ToStr();
   string linetype = dataObject["style"]["linetype"].ToStr();
   string linestyle = dataObject["style"]["linestyle"].ToStr();
@@ -684,7 +679,7 @@ void AddChartIndicator(CJAVal &dataObject){
   int idx = GetChartWindowIdxByChartWindowId(chartIdStr);
   long ChartId = chartWindows[idx].id;
 
-  double chartIndicatorHandle = iCustom(ChartSymbol(ChartId),ChartPeriod(ChartId),"JsonAPIIndicator",chartIndicatorId,shortname,colorstyle,linetype,linestyle,linewidth);
+  double chartIndicatorHandle = iCustom(ChartSymbol(ChartId),ChartPeriod(ChartId),"JsonAPIIndicator",chartIndicatorId,shortname,linelabel,colorstyle,linetype,linestyle,linewidth);
         
   if(ChartIndicatorAdd(ChartId, chartIndicatorSubWindow, chartIndicatorHandle)){
     chartWindows[idx].indicatorId = chartIndicatorId;

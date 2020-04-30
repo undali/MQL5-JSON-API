@@ -22,7 +22,8 @@ Socket chartSubscriptionSocket(context,ZMQ_SUB);
 
 //--- input parameters
 input string            IndicatorId="";
-input string            ShortName="JsonAPI";   
+input string            ShortName="JsonAPI";
+input string            LineLabel="Value";   
 input string            ColorSyle = "clrRed";
 input string            LineType = "DRAW_LINE";
 input string            LineStyle = "STYLE_SOLID";
@@ -53,18 +54,20 @@ int OnInit()
 //--- indicator buffers mapping;
    ArraySetAsSeries(Buffer,true);
    SetIndexBuffer(0,Buffer,INDICATOR_DATA);
+   SetIndexBuffer(1,Buffer,INDICATOR_CALCULATIONS);
    
    color colorstyle = StringToColor(ColorSyle);
    int linetype = StringToEnumInt(LineType);
    int linestyle = StringToEnumInt(LineStyle);
-   SetStyle(ShortName, colorstyle, linetype, linestyle, LineWidth);
+   SetStyle(ShortName, LineLabel, colorstyle, linetype, linestyle, LineWidth);
 //---
    return(INIT_SUCCEEDED);
   }
   
 
-void SetStyle(string shortname, color colorstyle, int linetype, int linestyle, int linewidth) {
+void SetStyle(string shortname, string linelabel, color colorstyle, int linetype, int linestyle, int linewidth) {
   IndicatorSetString(INDICATOR_SHORTNAME,shortname);
+  PlotIndexSetString(0,PLOT_LABEL,linelabel);
   PlotIndexSetInteger(0,PLOT_LINE_COLOR,0,colorstyle);
   PlotIndexSetInteger(0,PLOT_DRAW_TYPE,linetype);
   PlotIndexSetInteger(0,PLOT_LINE_STYLE,linestyle);
@@ -145,8 +148,7 @@ void CheckMessages(){
 
   // Request recived
   if(chartMsg.size()>0){ 
-    // Handle subscription SubscriptionHandler().
-    Print(chartMsg.getData());
+    // Handle subscription SubscriptionHandler()
     SubscriptionHandler(chartMsg);
     ChartRedraw(ChartID());
   }
