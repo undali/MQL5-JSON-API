@@ -3,6 +3,7 @@
 - add support for spreads
 - add support for drawing custom indicator data to charts
 - add support for indicator data output
+- new error reporting
 
 ### 16th February 2020
 
