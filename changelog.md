@@ -1,8 +1,8 @@
 ### 30th April 2020
 
 - add support for spreads
-- add support for drawing custom indicator data to charts
-- add support for indicator data output
+- add support for plotting custom indicator data to charts
+- add support for streaming MT5 indicator data
 - new error reporting
 
 ### 16th February 2020

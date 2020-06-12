@@ -88,7 +88,7 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
   {
-  // While a new candle is forming, set the current value to the previous value
+  // While a new candle is forming, set the current value to be empty
   if(rates_total>prev_calculated){
     Buffer[0] = EMPTY_VALUE;
   }
@@ -109,7 +109,11 @@ void SubscriptionHandler(ZmqMsg &chartMsg){
     Alert("Deserialization Error");
     ExpertRemove();
   }
-  if(message["indicatorChartId"]==IndicatorId) WriteToBuffer(message);
+  if(message["indicatorChartId"]==IndicatorId) { 
+    if(message["action"]=="PLOT") {
+        WriteToBuffer(message);
+    }
+  }
 }
 
 //+------------------------------------------------------------------+
@@ -131,6 +135,7 @@ void WriteToBuffer(CJAVal &message) {
       Buffer[i+1] = message["data"][messageDataSize-1-i].ToDbl();
     }
   }
+  // Set the most recent plotted value to nothing, as we do not have any data for yet unformed candles
   Buffer[0] = EMPTY_VALUE;
 }
 
@@ -139,14 +144,14 @@ void WriteToBuffer(CJAVal &message) {
 //| Check for new indicator data function                            |
 //+------------------------------------------------------------------+
 void CheckMessages(){
-  // This is a workaround for Timer(). It is needed, because Timer() works, when the indicator is manually added to a chart, but not with ChartIndicatorAdd()
+  // This is a workaround for Timer(). It is needed, because OnTimer() works if the indicator is manually added to a chart, but not with ChartIndicatorAdd()
 
   ZmqMsg chartMsg;
 
   // Recieve chart instructions stream from client via live Chart socket.
   chartSubscriptionSocket.recv(chartMsg,true);
 
-  // Request recived
+  // Request recieved
   if(chartMsg.size()>0){ 
     // Handle subscription SubscriptionHandler()
     SubscriptionHandler(chartMsg);

@@ -443,7 +443,7 @@ void IndicatorControl(CJAVal &dataObject){
   if(actionType=="REQUEST") {
     GetIndicatorResult(dataObject);
   }
-  else if(actionType=="START") {
+  else if(actionType=="ATTACH") {
     StartIndicator(dataObject);
   }
 }
