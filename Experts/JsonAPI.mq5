@@ -41,7 +41,7 @@ int LIVE_PORT=15557;
 int STR_PORT=15558;
 int INDICATOR_DATA_PORT=15559;
 int CHART_DATA_PORT=15560;
-int CHART_INDICATOR_PORT=15562;
+int CHART_INDICATOR_DATA_PORT=15562;
 
 // ZeroMQ Cnnections
 Context context("MQL5 JSON API");
@@ -51,7 +51,7 @@ Socket liveSocket(context,ZMQ_PUSH);
 Socket streamSocket(context,ZMQ_PUSH);
 Socket indicatorDataSocket(context,ZMQ_PUSH);
 Socket chartDataSocket(context,ZMQ_PULL);
-Socket chartIndicatorSocket(context,ZMQ_PUB);
+Socket chartIndicatorDataSocket(context,ZMQ_PUB);
 
 // Global variables \\
 bool debug = false;
@@ -84,11 +84,18 @@ int indicatorCount = 0;
 struct ChartWindow {
   long id; // Internal id
   string chartId; // UUID
-  string indicatorId; // UUID
-  int indicatorHandle; // Internal id/handle
 };
 ChartWindow chartWindows[];
 int chartWindowCount = 0;
+
+struct ChartWindowIndicator {
+  long id; // Internal id
+  string indicatorId; // UUID
+  int indicatorHandle; // Internal id/handle
+};
+
+ChartWindowIndicator chartWindowIndicators[];
+int chartWindowIndicatorCount = 0;
 
 // Refresh chart window interval for JsonAPIIndicator
 int chartWindowTimerInterval = 100; // Cycles of the globally set EventSetMillisecondTimer interval
@@ -114,8 +121,8 @@ bool BindSockets(){
   if (result == false) { return result; } else {Print("Bound 'Indicator Data' socket on port ", INDICATOR_DATA_PORT);}
   result = chartDataSocket.bind(StringFormat("tcp://%s:%d", HOST,CHART_DATA_PORT));
   if (result == false) { return result; } else {Print("Bound 'Chart Data' socket on port ", CHART_DATA_PORT);}
-  result = chartIndicatorSocket.bind(StringFormat("tcp://%s:%d", HOST,CHART_INDICATOR_PORT));
-  if (result == false) { return result; } else {Print("Bound 'JsonAPIIndicator Data' socket on port ", CHART_INDICATOR_PORT);}
+  result = chartIndicatorDataSocket.bind(StringFormat("tcp://%s:%d", HOST,CHART_INDICATOR_DATA_PORT));
+  if (result == false) { return result; } else {Print("Bound 'JsonAPIIndicator Data' socket on port ", CHART_INDICATOR_DATA_PORT);}
     
   sysSocket.setLinger(1000);
   dataSocket.setLinger(1000);
@@ -123,7 +130,7 @@ bool BindSockets(){
   streamSocket.setLinger(1000);
   indicatorDataSocket.setLinger(1000);
   chartDataSocket.setLinger(1000);
-  chartIndicatorSocket.setLinger(1000);
+  chartIndicatorDataSocket.setLinger(1000);
     
   // Number of messages to buffer in RAM.
   sysSocket.setSendHighWaterMark(1);
@@ -132,7 +139,7 @@ bool BindSockets(){
   streamSocket.setSendHighWaterMark(50);
   indicatorDataSocket.setSendHighWaterMark(5);
   chartDataSocket.setReceiveHighWaterMark(1); // TODO confirm settings
-  chartIndicatorSocket.setReceiveHighWaterMark(1);
+  chartIndicatorDataSocket.setReceiveHighWaterMark(1);
 
   return result;
 }
@@ -201,7 +208,7 @@ void OnDeinit(const int reason){
       Print("Unbinding 'Chart Data' socket on port ", STR_PORT, "..");
       streamSocket.unbind(StringFormat("tcp://%s:%d", HOST, CHART_DATA_PORT));
       Print("Unbinding 'JsonAPIIndicator Data' socket on port ", STR_PORT, "..");
-      streamSocket.unbind(StringFormat("tcp://%s:%d", HOST, CHART_INDICATOR_PORT));
+      streamSocket.unbind(StringFormat("tcp://%s:%d", HOST, CHART_INDICATOR_DATA_PORT));
       
       // Shutdown ZeroMQ Context
       context.shutdown();
@@ -257,6 +264,21 @@ int GetChartWindowIdxByChartWindowId(string chartWindowId)
   }
 
 //+------------------------------------------------------------------+
+//| Get index of chart indicator handler array by indicator id string      |
+//+------------------------------------------------------------------+
+int GetChartIndicatorIdxByChartIndicatorId(string indicatorId)
+  {
+     for(int i=0;i<chartWindowIndicatorCount;i++)
+     {
+      if(chartWindowIndicators[i].indicatorId == indicatorId){
+          return i;
+      }
+     }
+     return -1;
+  }
+
+
+//+------------------------------------------------------------------+
 //| Stream live price data                                           |
 //+------------------------------------------------------------------+
 void StreamPriceData(){
@@ -286,6 +308,7 @@ void StreamPriceData(){
           if(CopySpread(symbol,period,1,1,spread)!=1) { /*mControl.Check();*/; }
           thisBar=(datetime)rates[0].time;
         }
+
         if(lastBar!=thisBar){
           if(lastBar!=0){ // skip first price data after startup/reset
             if( chartTF == "TICK"){
@@ -354,16 +377,19 @@ void OnTimer(){
   ZmqMsg chartMsg;
   chartDataSocket.recv(chartMsg, true);
   if(chartMsg.size()>0){
-    if(debug) Print(chartMsg.getData());
-    chartIndicatorSocket.send(chartMsg,true);  
+      double values[];
+      // Ensure that all indicators have finished intitailisation
+      for(int i=0;i<ArraySize(chartWindowIndicators);i++){
+         CopyBuffer(chartWindowIndicators[i].indicatorHandle, 7, 0, 1, values); // '7' is the number of the 'alive' indicator buffer
+      }
+      chartIndicatorDataSocket.send(chartMsg,true); 
   }
   
   // Trigger the indicator JsonAPIIndicator to check for new Messages
   if(chartWindowTimerCounter >= chartWindowTimerInterval) {
     for(int i=0;i<ArraySize(chartWindows);i++){
       long ChartId = chartWindows[i].id;
-      string chartIndicatorId = chartWindows[i].indicatorId;
-      EventChartCustom(ChartId, 222, 222, 222.0, chartIndicatorId);
+      EventChartCustom(ChartId, 222, 222, 222.0);
     }
     chartWindowTimerCounter = 0;
   }
@@ -651,6 +677,7 @@ void OpenChart(CJAVal &dataObject){
 
   ENUM_TIMEFRAMES period = GetTimeframe(chartTF);
   chartWindows[idx].id = ChartOpen(symbol, period);
+  ChartSetInteger(chartWindows[idx].id, CHART_AUTOSCROLL, false);
   
   CJAVal message;
   message["error"]=(bool) false;
@@ -669,21 +696,19 @@ void AddChartIndicator(CJAVal &dataObject){
   string chartIdStr=dataObject["chartId"].ToStr();
   string chartIndicatorId=dataObject["indicatorChartId"].ToStr();
   int chartIndicatorSubWindow=dataObject["chartIndicatorSubWindow"].ToInt();
-  string shortname = dataObject["style"]["shortname"].ToStr();
-  string linelabel = dataObject["style"]["linelabel"].ToStr();
-  string colorstyle = dataObject["style"]["color"].ToStr();
-  string linetype = dataObject["style"]["linetype"].ToStr();
-  string linestyle = dataObject["style"]["linestyle"].ToStr();
-  int linewidth = dataObject["style"]["linewidth"].ToInt();
+  //string shortname = dataObject["style"]["shortname"].ToStr();
 
-  int idx = GetChartWindowIdxByChartWindowId(chartIdStr);
-  long ChartId = chartWindows[idx].id;
+  int chartIdx = GetChartWindowIdxByChartWindowId(chartIdStr);
+  long ChartId = chartWindows[chartIdx].id;
 
-  double chartIndicatorHandle = iCustom(ChartSymbol(ChartId),ChartPeriod(ChartId),"JsonAPIIndicator",chartIndicatorId,shortname,linelabel,colorstyle,linetype,linestyle,linewidth);
-        
-  if(ChartIndicatorAdd(ChartId, chartIndicatorSubWindow, chartIndicatorHandle)){
-    chartWindows[idx].indicatorId = chartIndicatorId;
-    chartWindows[idx].indicatorHandle = chartIndicatorHandle;
+  double chartIndicatorHandle = iCustom(ChartSymbol(ChartId),ChartPeriod(ChartId),"JsonAPIIndicator",chartIndicatorId,"JsonAPI"); //linelabel,colorstyle,linetype,linestyle,linewidth);
+    
+  if(ChartIndicatorAdd(ChartId, chartIndicatorSubWindow, chartIndicatorHandle)) {
+     chartWindowIndicatorCount++;    
+     ArrayResize(chartWindowIndicators,chartWindowIndicatorCount);
+     int indicatorIdx = chartWindowIndicatorCount-1;
+     chartWindowIndicators[indicatorIdx].indicatorId = chartIndicatorId;
+     chartWindowIndicators[indicatorIdx].indicatorHandle = chartIndicatorHandle;
   }
   if(!CheckError(__FUNCTION__)) {
     CJAVal message;
@@ -1353,11 +1378,17 @@ void ResetSubscriptionsAndIndicators(){
    }
    ArrayFree(indicators);
    indicatorCount = 0;
-   
+
+   for(int i=0;i<chartWindowIndicatorCount;i++){
+    if(!IndicatorRelease(chartWindowIndicators[i].indicatorHandle)) error = true;
+   }
+   ArrayFree(chartWindowIndicators);
+   chartWindowIndicatorCount = 0;
+
    for(int i=0;i<ArraySize(chartWindows);i++){
     // TODO check if chart exists first: if(ChartGetInteger...
-    if(!IndicatorRelease(chartWindows[i].indicatorHandle)) error = true;
-    ChartClose(chartWindows[i].id);
+    //if(!IndicatorRelease(chartWindows[i].indicatorHandle)) error = true;
+    if (chartWindows[i].id != 0) ChartClose(chartWindows[i].id);
    }
    ArrayFree(chartWindows);
     
