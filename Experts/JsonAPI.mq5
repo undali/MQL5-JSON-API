@@ -39,28 +39,21 @@ int SYS_PORT=15555;
 int DATA_PORT=15556;
 int LIVE_PORT=15557;
 int STR_PORT=15558;
-/*
-int INDICATOR_DATA_PORT=15559;
-*/
-/*
-int CHART_DATA_PORT=15560;
-int CHART_INDICATOR_DATA_PORT=15562;
-*/
 
-// ZeroMQ Cnnections
+// ZeroMQ Connections
 Context context("MQL5 JSON API");
 Socket sysSocket(context,ZMQ_REP);
 Socket dataSocket(context,ZMQ_PUSH);
 Socket liveSocket(context,ZMQ_PUSH);
 Socket streamSocket(context,ZMQ_PUSH);
-/*
-Socket indicatorDataSocket(context,ZMQ_PUSH);
-Socket chartDataSocket(context,ZMQ_PULL);
-Socket chartIndicatorDataSocket(context,ZMQ_PUB);
-*/
-#include <StartIndicator.mqh>
-#include <ChartControl.mqh>
-#include <HistoryInfo.mqh>
+
+// Load MQL5-JSON-API includes
+// Required:
+#include <MQL5-JSON_API/HistoryInfo.mqh>
+#include <MQL5-JSON_API/Broker.mqh>
+// Optional:
+#include <MQL5-JSON_API/StartIndicator.mqh>
+#include <MQL5-JSON_API/ChartControl.mqh>
 
 // Global variables \\
 bool debug = false;
@@ -78,44 +71,6 @@ struct SymbolSubscription
   };
 SymbolSubscription symbolSubscriptions[];
 int symbolSubscriptionCount = 0;
-
-/*
-// Variables for controlling indicators
-struct Indicator
-  {
-   long              id; // Internal id
-   string            indicatorId; // UUID
-   int               indicatorHandle; // Internal id/handle
-   int               indicatorParamCount; // Number of parameters to be passed to the indicator
-   int               indicatorBufferCount; // Numnber of buffers to be returned bythe indicator
-  };
-
-Indicator indicators[];
-int indicatorCount = 0;
-
-// Variables for controlling chart
-struct ChartWindow
-  {
-   long              id; // Internal id
-   string            chartId; // UUID
-  };
-*/
-
-/*
-ChartWindow chartWindows[];
-int chartWindowCount = 0;
-
-struct ChartWindowIndicator
-  {
-   long              id; // Internal id
-   string            indicatorId; // UUID
-   int               indicatorHandle; // Internal id/handle
-  };
-
-ChartWindowIndicator chartWindowIndicators[];
-int chartWindowIndicatorCount = 0;
-
-*/
 
 // Error handling
 ControlErrors mControl;
@@ -259,7 +214,6 @@ int OnInit()
       return(INIT_FAILED);
      }
 
-//testDraw();
    return(INIT_SUCCEEDED);
   }
 
@@ -289,10 +243,14 @@ void OnDeinit(const int reason)
       liveSocket.unbind(StringFormat("tcp://%s:%d", HOST, LIVE_PORT));
       Print("Unbinding 'Streaming' socket on port ", STR_PORT, "..");
       streamSocket.unbind(StringFormat("tcp://%s:%d", HOST, STR_PORT));
+#ifdef START_INDICATOR
+      Print("Unbinding 'Indicator Data' socket on port ", INDICATOR_DATA_PORT, "..");
+      streamSocket.unbind(StringFormat("tcp://%s:%d", HOST, INDICATOR_DATA_PORT));
+#endif
 #ifdef CHART_CONTROL
-      Print("Unbinding 'Chart Data' socket on port ", STR_PORT, "..");
+      Print("Unbinding 'Chart Data' socket on port ", CHART_DATA_PORT, "..");
       streamSocket.unbind(StringFormat("tcp://%s:%d", HOST, CHART_DATA_PORT));
-      Print("Unbinding 'JsonAPIIndicator Data' socket on port ", STR_PORT, "..");
+      Print("Unbinding 'JsonAPIIndicator Data' socket on port ", CHART_INDICATOR_DATA_PORT, "..");
       streamSocket.unbind(StringFormat("tcp://%s:%d", HOST, CHART_INDICATOR_DATA_PORT));
 #endif
 
@@ -321,55 +279,6 @@ bool HasChartSymbol(string symbol, string chartTF)
      }
    return false;
   }
-/*
-//+------------------------------------------------------------------+
-//| Get index of indicator handler array by indicator id string      |
-//+------------------------------------------------------------------+
-int GetIndicatorIdxByIndicatorId(string indicatorId)
-  {
-   for(int i=0; i<indicatorCount; i++)
-     {
-      if(indicators[i].indicatorId == indicatorId)
-        {
-         return i;
-        }
-     }
-   return -1;
-  }
-*/
-
-/*
-//+------------------------------------------------------------------+
-//| Get index of chart window array by chart window id string        |
-//+------------------------------------------------------------------+
-int GetChartWindowIdxByChartWindowId(string chartWindowId)
-  {
-   for(int i=0; i<chartWindowCount; i++)
-     {
-      if(chartWindows[i].chartId == chartWindowId)
-        {
-         return i;
-        }
-     }
-   return -1;
-  }
-
-
-//+------------------------------------------------------------------+
-//| Get index of chart indicator handler array by indicator id string      |
-//+------------------------------------------------------------------+
-int GetChartIndicatorIdxByChartIndicatorId(string indicatorId)
-  {
-   for(int i=0; i<chartWindowIndicatorCount; i++)
-     {
-      if(chartWindowIndicators[i].indicatorId == indicatorId)
-        {
-         return i;
-        }
-     }
-   return -1;
-  }
-*/
 
 //+------------------------------------------------------------------+
 //| Stream live price data                                           |
@@ -493,9 +402,8 @@ void OnTimer()
       // Ensure that all indicators have finished intitailisation
       for(int i=0; i<ArraySize(chartWindowIndicators); i++)
         {
-         //CopyBuffer(chartWindowIndicators[i].indicatorHandle, 7, 0, 1, values); // '7' is the number of the 'alive' indicator buffer
          // Wait for CopyBuffer to return. Ensures that indicator has been initialized
-         CopyBuffer(chartWindowIndicators[i].indicatorHandle, 0, 0, 1, values); // '7' is the number of the 'alive' indicator buffer
+         CopyBuffer(chartWindowIndicators[i].indicatorHandle, 0, 0, 1, values);
         }
       chartIndicatorDataSocket.send(chartMsg,true);
      }
@@ -506,8 +414,8 @@ void OnTimer()
       long chartId = chartWindows[i].id;
       EventChartCustom(chartId, 222, 222, 222.0);
      }
-  }
 #endif
+  }
 //+------------------------------------------------------------------+
 //| Request handler                                                  |
 //+------------------------------------------------------------------+
@@ -568,12 +476,13 @@ void RequestHandler(ZmqMsg &request)
 #ifdef CHART_CONTROL
                               if(action=="CHART")
                                  ChartControl(incomingMessage);
-#endif
                               else
+#endif
                                 {
                                  mControl.mSetUserError(65538, GetErrorID(65538));
                                  CheckError(__FUNCTION__);
                                 }
+
 
   }
 
@@ -599,303 +508,6 @@ void ScriptConfiguration(CJAVal &dataObject)
       ActionDoneOrError(ERR_SUCCESS, __FUNCTION__, "ERR_SUCCESS");
   }
 
-/*
-//+------------------------------------------------------------------+
-//| Start new indicator or request indicator data                    |
-//+------------------------------------------------------------------+
-void IndicatorControl(CJAVal &dataObject)
-  {
-
-   string actionType=dataObject["actionType"].ToStr();
-
-   if(actionType=="REQUEST")
-     {
-      GetIndicatorResult(dataObject);
-     }
-   else
-      if(actionType=="ATTACH")
-        {
-         StartIndicator(dataObject);
-        }
-  }
-*/
-
-//+------------------------------------------------------------------+
-//| Check if string is a representation of a number                  |
-//+------------------------------------------------------------------+
-bool IsNumberAsString(string str)
-  {
-// MQL5 seems to return true if the values are the same, no matter the data type, in this case comparing str and dbl/int.
-// (str "2.1" == double 2.1) will return true.
-   double dbl = StringToDouble(str);
-   int integer = StringToInteger(str);
-// Compaing to both int and double to cover both cases
-   if(str==dbl || str==integer)
-      return true;
-   else
-      return false;
-  }
-
-/*
-//+------------------------------------------------------------------+
-//| Start new indicator instance                                     |
-//+------------------------------------------------------------------+
-void StartIndicator(CJAVal &dataObject)
-  {
-
-// TODO map Indicators Constants https://www.mql5.com/en/docs/constants/indicatorconstants
-
-   string symbol=dataObject["symbol"].ToStr();
-   string chartTF=dataObject["chartTF"].ToStr();
-   string id=dataObject["id"].ToStr();
-   string indicatorName=dataObject["name"].ToStr();
-
-   indicatorCount++;
-   ArrayResize(indicators,indicatorCount);
-
-   int idx = indicatorCount-1;
-
-   indicators[idx].indicatorId = id;
-   indicators[idx].indicatorBufferCount = dataObject["linecount"].ToInt();
-
-   double params[];
-   indicators[idx].indicatorParamCount = dataObject["params"].Size();
-   for(int i=0; i<indicators[idx].indicatorParamCount; i++)
-     {
-      // TODO test it. Is it ok to pass EnumInts as Doubles for params?
-      ArrayResize(params, i+1);
-      string paramStr = dataObject["params"][i].ToStr();
-      if(IsNumberAsString(paramStr))
-         params[i] = StringToDouble(paramStr);
-      else
-        {
-         params[i] = StringToEnumInt(paramStr);
-         mControl.mResetLastError(); // TODO find where the Error 4003 is craeted in StringToEnumInt
-        }
-     }
-
-   ENUM_TIMEFRAMES period = GetTimeframe(chartTF);
-
-// Case construct for passing variable parameter count to the iCustom function is used, because MQL5 does not seem to support expanding an array to a function parameter list
-   switch(indicators[idx].indicatorParamCount)
-     {
-      case 0:
-         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName);
-         break;
-      case 1:
-         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0]);
-         break;
-      case 2:
-         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1]);
-         break;
-      case 3:
-         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2]);
-         break;
-      case 4:
-         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3]);
-         break;
-      case 5:
-         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4]);
-         break;
-      case 6:
-         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5]);
-         break;
-      case 7:
-         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6]);
-         break;
-      case 8:
-         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7]);
-         break;
-      case 9:
-         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8]);
-         break;
-      case 10:
-         indicators[idx].indicatorHandle = iCustom(symbol,period,indicatorName, params[0], params[1], params[2], params[3], params[4], params[5], params[6], params[7], params[8], params[9]);
-         break;
-      default:
-         // TODO error handling
-         break;
-     }
-
-   CJAVal message;
-
-   if(mControl.mGetLastError())
-     {
-      int lastError = mControl.mGetLastError();
-      string desc = mControl.mGetDesc();
-      mControl.Check();
-
-      message["error"]=(bool) true;
-      message["lastError"]=(string) lastError;
-      message["description"]=desc;
-      message["function"]=(string) __FUNCTION__;
-      string t=message.Serialize();
-      if(debug)
-         Print(t);
-      InformClientSocket(indicatorDataSocket,t);
-     }
-   else
-     {
-      message["error"]=(bool) false;
-      message["id"] = (string) id;
-
-      string t=message.Serialize();
-      if(debug)
-         Print(t);
-      InformClientSocket(indicatorDataSocket,t);
-     }
-
-  }
-
-//+------------------------------------------------------------------+
-//| Get indicator results                                            |
-//+------------------------------------------------------------------+
-void GetIndicatorResult(CJAVal &dataObject)
-  {
-
-   datetime fromDate=dataObject["fromDate"].ToInt();
-   string id=dataObject["id"].ToStr();
-   string indicatorName=dataObject["indicatorName"].ToStr();
-
-   int idx = GetIndicatorIdxByIndicatorId(id);
-
-   double values[2];
-
-   CJAVal results;
-// Cycle through all avaliable buffer positions
-   for(int i=0; i<indicators[idx].indicatorBufferCount; i++)
-     {
-      values[0] = 0.0;
-      values[1] = 0.0;
-      results[i] = 0.0;
-      if(idx >= 0)
-        {
-         if(CopyBuffer(indicators[idx].indicatorHandle, i, fromDate, 1, values) < 0)
-           {
-            if(mControl.mGetLastError())
-              {
-               CJAVal message;
-               int lastError = mControl.mGetLastError();
-               string desc = mControl.mGetDesc();
-               mControl.Check();
-
-               message["error"]=(bool) true;
-               message["lastError"]=(string) lastError;
-               message["description"]=desc;
-               message["function"]=(string) __FUNCTION__;
-               string t=message.Serialize();
-               if(debug)
-                  Print(t);
-               InformClientSocket(indicatorDataSocket,t);
-              }
-           }
-         results[i] = DoubleToString(values[0]);
-        }
-     }
-
-   CJAVal message;
-   message["error"]=(bool) false;
-   message["id"] = (string) id;
-   message["data"].Set(results);
-
-   string t=message.Serialize();
-   if(debug)
-      Print(t);
-   InformClientSocket(indicatorDataSocket,t);
-
-  }
-*/
-
-/*
-//+------------------------------------------------------------------+
-//| Open new chart or add indicator to chart                         |
-//+------------------------------------------------------------------+
-
-void ChartControl(CJAVal &dataObject)
-  {
-
-   string actionType=dataObject["actionType"].ToStr();
-
-   if(actionType=="ADDINDICATOR")
-     {
-      AddChartIndicator(dataObject);
-     }
-   else
-      if(actionType=="OPEN")
-        {
-         OpenChart(dataObject);
-        }
-  }
-
-//+------------------------------------------------------------------+
-//| Open new chart                                                   |
-//+------------------------------------------------------------------+
-void OpenChart(CJAVal &dataObject)
-  {
-
-   string chartId=dataObject["chartId"].ToStr();
-   string symbol=dataObject["symbol"].ToStr();
-   string chartTF=dataObject["chartTF"].ToStr();
-
-   chartWindowCount++;
-   ArrayResize(chartWindows,chartWindowCount);
-
-   int idx = chartWindowCount-1;
-
-   chartWindows[idx].chartId = chartId;
-
-   ENUM_TIMEFRAMES period = GetTimeframe(chartTF);
-   chartWindows[idx].id = ChartOpen(symbol, period);
-   ChartSetInteger(chartWindows[idx].id, CHART_AUTOSCROLL, false);
-
-   CJAVal message;
-   message["error"]=(bool) false;
-   message["chartId"] = (string) chartId;
-   message["mtChartId"] = (string) chartWindows[idx].id;
-
-   string t=message.Serialize();
-   if(debug)
-      Print(t);
-   InformClientSocket(dataSocket,t);
-  }
-
-//+------------------------------------------------------------------+
-//| Add JsonAPIIndicator indicator to chart                          |
-//+------------------------------------------------------------------+
-void AddChartIndicator(CJAVal &dataObject)
-  {
-
-   string chartIdStr=dataObject["chartId"].ToStr();
-   string chartIndicatorId=dataObject["chartIndicatorId"].ToStr();
-   int chartIndicatorSubWindow=dataObject["chartIndicatorSubWindow"].ToInt();
-   string shortName = dataObject["shortName"].ToStr();
-
-   int chartIdx = GetChartWindowIdxByChartWindowId(chartIdStr);
-   long chartId = chartWindows[chartIdx].id;
-
-   double chartIndicatorHandle = iCustom(ChartSymbol(chartId),ChartPeriod(chartId),"JsonAPIIndicator",chartIndicatorId,shortName); //linelabel,colorstyle,linetype,linestyle,linewidth);
-
-   if(ChartIndicatorAdd(chartId, chartIndicatorSubWindow, chartIndicatorHandle))
-     {
-      chartWindowIndicatorCount++;
-      ArrayResize(chartWindowIndicators,chartWindowIndicatorCount);
-      int indicatorIdx = chartWindowIndicatorCount-1;
-      chartWindowIndicators[indicatorIdx].indicatorId = chartIndicatorId;
-      chartWindowIndicators[indicatorIdx].indicatorHandle = chartIndicatorHandle;
-     }
-   if(!CheckError(__FUNCTION__))
-     {
-      CJAVal message;
-      message["error"]=(bool) false;
-      message["chartId"] = (string) chartIdStr;
-
-      string t=message.Serialize();
-      if(debug)
-         Print(t);
-      InformClientSocket(dataSocket,t);
-     }
-  }
-*/
 //+------------------------------------------------------------------+
 //| Account information                                              |
 //+------------------------------------------------------------------+
@@ -950,643 +562,6 @@ bool PushHistoricalData(CJAVal &data)
       Print(t);
    InformClientSocket(dataSocket,t);
    return true;
-  }
-
-/*
-//+------------------------------------------------------------------+
-//| Correct historical tick data                                     |
-//+------------------------------------------------------------------+
-// Some brokers (markets.com) deliver incorrect historical tick data
-// with an incorrect spread.
-// This attempts to automatically adjust the
-// historical tick data.
-// Live bar data is also represented with the same, incorrect spread so we attempt
-// to adjust historical tick data by that same amount.
-void CorrectTicks(string symbol, MqlTick &copyTicksArray[])
-  {
-   MqlTick symbolInfoTick;
-   double offsetBid, offsetAsk;
-   int tickCount = ArraySize(copyTicksArray);
-   SymbolInfoTick(symbol,symbolInfoTick);
-
-   offsetBid = copyTicksArray[tickCount-1].bid - symbolInfoTick.bid;
-   offsetAsk = copyTicksArray[tickCount-1].ask - symbolInfoTick.ask;
-
-   for(int i=0; i<tickCount; i++)
-     {
-      copyTicksArray[i].bid = copyTicksArray[i].bid - offsetBid;
-      copyTicksArray[i].ask = copyTicksArray[i].ask - offsetAsk;
-     }
-  }
-*/
-
-/*
-//+------------------------------------------------------------------+
-//| Get historical data                                              |
-//+------------------------------------------------------------------+
-void HistoryInfo(CJAVal &dataObject)
-  {
-
-   string actionType = dataObject["actionType"].ToStr();
-   string chartTF = dataObject["chartTF"].ToStr();
-   string symbol=dataObject["symbol"].ToStr();
-   // bool correctTickHistory=dataObject["correctTickHistory"].ToBool();
-
-// Write CVS fle to local directory
-   if(actionType=="WRITE" && chartTF=="TICK")
-     {
-
-      CJAVal data, d, msg;
-      MqlTick tickArray[];
-      string fileName=symbol + "-" + chartTF + ".csv";  // file name
-      string directoryName="Data"; // directory name
-      string outputFile=directoryName+"\\"+fileName;
-
-      ENUM_TIMEFRAMES period=GetTimeframe(chartTF);
-      datetime fromDate=(datetime)dataObject["fromDate"].ToInt();
-      datetime toDate=TimeCurrent();
-      if(dataObject["toDate"].ToInt()!=NULL)
-         toDate=(datetime)dataObject["toDate"].ToInt();
-
-      Print("Fetching HISTORY");
-      Print("1) Symbol: "+symbol);
-      Print("2) Timeframe: Ticks");
-      Print("3) Date from: "+TimeToString(fromDate));
-      if(dataObject["toDate"].ToInt()!=NULL)
-         Print("4) Date to:"+TimeToString(toDate));
-
-      int tickCount = 0;
-      ulong fromDateM = StringToTime(fromDate);
-      ulong toDateM = StringToTime(toDate);
-
-      tickCount=CopyTicksRange(symbol,tickArray,COPY_TICKS_ALL,1000*(ulong)fromDateM,1000*(ulong)toDateM);
-      if(tickCount < 0)
-        {
-         mControl.mSetUserError(65541, GetErrorID(65541));
-        }
-      CheckError(__FUNCTION__);
-
-      Print("Preparing data of ", tickCount, " ticks for ", symbol);
-      //if(correctTickHistory)
-      //   CorrectTicks(symbol,tickArray);
-     
-      int file_handle=FileOpen(outputFile, FILE_WRITE | FILE_CSV);
-      if(file_handle!=INVALID_HANDLE)
-        {
-         msg["status"] = (string) "CONNECTED";
-         msg["type"] = (string) "NORMAL";
-         msg["data"] = (string) StringFormat("Writing to: %s\\%s", TerminalInfoString(TERMINAL_DATA_PATH), outputFile);
-         if(liveStream)
-            InformClientSocket(liveSocket, msg.Serialize());
-         ActionDoneOrError(ERR_SUCCESS, __FUNCTION__, "ERR_SUCCESS");
-         //ActionDoneOrError(ERR_SUCCESS  , __FUNCTION__, dataSocket);
-         // Inform client that file is avalable for writing
-
-         PrintFormat("%s file is available for writing",fileName);
-         PrintFormat("File path: %s\\Files\\",TerminalInfoString(TERMINAL_DATA_PATH));
-         //--- write the time and values of signals to the file
-         for(int i=0; i<tickCount; i++)
-           {
-            FileWrite(file_handle,tickArray[i].time_msc, ",", tickArray[i].bid, ",", tickArray[i].ask);
-            msg["status"] = (string) "CONNECTED";
-            msg["type"] = (string) "FLUSH";
-            msg["data"] = (string) tickArray[i].time_msc;
-            if(liveStream)
-               InformClientSocket(liveSocket, msg.Serialize());
-           }
-         //--- close the file
-         FileClose(file_handle);
-         PrintFormat("Data is written, %s file is closed",fileName);
-         msg["status"] = (string) "DISCONNECTED";
-         msg["type"] = (string) "NORMAL";
-         msg["data"] = (string) StringFormat("Writing to: %s\\%s", outputFile, " is finished");
-         if(liveStream)
-            InformClientSocket(liveSocket, msg.Serialize());
-
-        }
-      else
-        {
-         // File is not available for writing
-         mControl.mSetUserError(65542, GetErrorID(65542));
-         CheckError(__FUNCTION__);
-        }
-      connectedFlag=false;
-     }
-
-// Write CVS fle to local directory
-   else
-      if(actionType=="WRITE" && chartTF!="TICK")
-        {
-
-         CJAVal c, d;
-         MqlRates r[];
-         int spread[];
-         string fileName=symbol + "-" + chartTF + ".csv";  // file name
-         string directoryName="Data"; // directory name
-         string outputFile=directoryName+"//"+fileName;
-
-         int barCount;
-         ENUM_TIMEFRAMES period=GetTimeframe(chartTF);
-         datetime fromDate=(datetime)dataObject["fromDate"].ToInt();
-         datetime toDate=TimeCurrent();
-         if(dataObject["toDate"].ToInt()!=NULL)
-            toDate=(datetime)dataObject["toDate"].ToInt();
-
-         Print("Fetching HISTORY");
-         Print("1) Symbol :"+symbol);
-         Print("2) Timeframe :"+EnumToString(period));
-         Print("3) Date from :"+TimeToString(fromDate));
-         if(dataObject["toDate"].ToInt()!=NULL)
-            Print("4) Date to:"+TimeToString(toDate));
-
-         barCount=CopyRates(symbol,period,fromDate,toDate,r);
-         if(CopySpread(symbol,period, fromDate, toDate, spread)!=1)
-           {
-            mControl.mSetUserError(65541, GetErrorID(65541));
-           }
-
-         Print("Preparing tick data of ", barCount, " ticks for ", symbol);
-         int file_handle=FileOpen(outputFile, FILE_WRITE | FILE_CSV);
-         if(file_handle!=INVALID_HANDLE)
-           {
-            ActionDoneOrError(ERR_SUCCESS, __FUNCTION__, "ERR_SUCCESS");;
-            PrintFormat("%s file is available for writing",outputFile);
-            PrintFormat("File path: %s\\Files\\",TerminalInfoString(TERMINAL_DATA_PATH));
-            //--- write the time and values of signals to the file
-            for(int i=0; i<barCount; i++)
-               FileWrite(file_handle,r[i].time, ",", r[i].open, ",", r[i].high, ",", r[i].low, ",", r[i].close, ",", r[i].tick_volume, spread[i]);
-            //--- close the file
-            FileClose(file_handle);
-            PrintFormat("Data is written, %s file is closed", outputFile);
-           }
-         else
-           {
-            mControl.mSetUserError(65542, GetErrorID(65542));
-            CheckError(__FUNCTION__);
-           }
-        }
-
-      else
-         if(actionType=="DATA" && chartTF=="TICK")
-           {
-
-            CJAVal data, d;
-            MqlTick tickArray[];
-
-            ENUM_TIMEFRAMES period=GetTimeframe(chartTF);
-            datetime fromDate=(datetime)dataObject["fromDate"].ToInt();
-            datetime toDate=TimeCurrent();
-            if(dataObject["toDate"].ToInt()!=NULL)
-               toDate=(datetime)dataObject["toDate"].ToInt();
-
-            if(debug)
-              {
-               Print("Fetching HISTORY");
-               Print("1) Symbol: "+symbol);
-               Print("2) Timeframe: Ticks");
-               Print("3) Date from: "+TimeToString(fromDate));
-               if(dataObject["toDate"].ToInt()!=NULL)
-                  Print("4) Date to:"+TimeToString(toDate));
-              }
-
-            int tickCount = 0;
-            ulong fromDateM = StringToTime(fromDate);
-            ulong toDateM = StringToTime(toDate);
-
-            tickCount=CopyTicksRange(symbol,tickArray, COPY_TICKS_ALL, 1000*(ulong)fromDateM, 1000*(ulong)toDateM);
-            Print("Preparing tick data of ", tickCount, " ticks for ", symbol);
-            
-            //if(correctTickHistory)
-            //   CorrectTicks(symbol,tickArray);
-            
-            if(tickCount)
-              {
-               for(int i=0; i<tickCount; i++)
-                 {
-                  data[i][0]=(long)   tickArray[i].time_msc;
-                  data[i][1]=(double) tickArray[i].bid;
-                  data[i][2]=(double) tickArray[i].ask;
-                 }
-               d["data"].Set(data);
-              }
-            else
-              {
-               d["data"].Add(data);
-              }
-            Print("Finished preparing tick data");
-
-            d["symbol"]=symbol;
-            d["timeframe"]=chartTF;
-
-            PushHistoricalData(d);
-           }
-
-         else
-            if(actionType=="DATA" && chartTF!="TICK")
-              {
-
-               CJAVal c, d;
-               MqlRates r[];
-               int spread[];
-               int barCount=0;
-               ENUM_TIMEFRAMES period=GetTimeframe(chartTF);
-               datetime fromDate=(datetime)dataObject["fromDate"].ToInt();
-               datetime toDate=TimeCurrent();
-               if(dataObject["toDate"].ToInt()!=NULL)
-                  toDate=(datetime)dataObject["toDate"].ToInt();
-
-               if(debug)
-                 {
-                  Print("Fetching HISTORY");
-                  Print("1) Symbol :"+symbol);
-                  Print("2) Timeframe :"+EnumToString(period));
-                  Print("3) Date from :"+TimeToString(fromDate));
-                  if(dataObject["toDate"].ToInt()!=NULL)
-                     Print("4) Date to:"+TimeToString(toDate));
-                 }
-
-               barCount=CopyRates(symbol, period, fromDate, toDate, r);
-               if(CopySpread(symbol,period, fromDate, toDate, spread)!=1) 
-               { 
-                  //mControl.Check(); 
-               }
-
-               if(barCount)
-                 {
-                  for(int i=0; i<barCount; i++)
-                    {
-                     c[i][0]=(long)   r[i].time;
-                     c[i][1]=(double) r[i].open;
-                     c[i][2]=(double) r[i].high;
-                     c[i][3]=(double) r[i].low;
-                     c[i][4]=(double) r[i].close;
-                     c[i][5]=(double) r[i].tick_volume;
-                     c[i][6]=(int) spread[i];
-                    }
-                  d["data"].Set(c);
-                 }
-               else
-                 {
-                  d["data"].Add(c);
-                 }
-
-               d["symbol"]=symbol;
-               d["timeframe"]=chartTF;
-
-               PushHistoricalData(d);
-              }
-
-            else
-               if(actionType=="TRADES")
-                 {
-                  CDealInfo tradeInfo;
-                  CJAVal trades, data;
-
-                  if(HistorySelect(0,TimeCurrent()))
-                    {
-                     // Get total deals in history
-                     int total = HistoryDealsTotal();
-                     ulong ticket; // deal ticket
-
-                     for(int i=0; i<total; i++)
-                       {
-                        if((ticket=HistoryDealGetTicket(i))>0)
-                          {
-                           tradeInfo.Ticket(ticket);
-                           data["ticket"]=(long) tradeInfo.Ticket();
-                           data["time"]=(long) tradeInfo.Time();
-                           data["price"]=(double) tradeInfo.Price();
-                           data["volume"]=(double) tradeInfo.Volume();
-                           data["symbol"]=(string) tradeInfo.Symbol();
-                           data["type"]=(string) tradeInfo.TypeDescription();
-                           data["entry"]=(long) tradeInfo.Entry();
-                           data["profit"]=(double) tradeInfo.Profit();
-
-                           trades["trades"].Add(data);
-                          }
-                       }
-                    }
-                  else
-                    {
-                     trades["trades"].Add(data);
-                    }
-
-                  string t=trades.Serialize();
-                  if(debug)
-                     Print(t);
-                  InformClientSocket(dataSocket,t);
-                 }
-               else
-                 {
-                  mControl.mSetUserError(65538, GetErrorID(65538));
-                  CheckError(__FUNCTION__);
-                 }
-  }
-*/
-//+------------------------------------------------------------------+
-//| Fetch positions information                                      |
-//+------------------------------------------------------------------+
-void GetPositions(CJAVal &dataObject)
-  {
-   CPositionInfo myposition;
-   CJAVal data, position;
-
-// Get positions
-   int positionsTotal=PositionsTotal();
-// Create empty array if no positions
-   if(!positionsTotal)
-      data["positions"].Add(position);
-// Go through positions in a loop
-   for(int i=0; i<positionsTotal; i++)
-     {
-      mControl.mResetLastError();
-
-      if(myposition.Select(PositionGetSymbol(i)))
-        {
-         position["id"]=PositionGetInteger(POSITION_IDENTIFIER);
-         position["magic"]=PositionGetInteger(POSITION_MAGIC);
-         position["symbol"]=PositionGetString(POSITION_SYMBOL);
-         position["type"]=EnumToString(ENUM_POSITION_TYPE(PositionGetInteger(POSITION_TYPE)));
-         position["time_setup"]=PositionGetInteger(POSITION_TIME);
-         position["open"]=PositionGetDouble(POSITION_PRICE_OPEN);
-         position["stoploss"]=PositionGetDouble(POSITION_SL);
-         position["takeprofit"]=PositionGetDouble(POSITION_TP);
-         position["volume"]=PositionGetDouble(POSITION_VOLUME);
-
-         data["error"]=(bool) false;
-         data["positions"].Add(position);
-        }
-      CheckError(__FUNCTION__);
-     }
-
-   string t=data.Serialize();
-   if(debug)
-      Print(t);
-   InformClientSocket(dataSocket,t);
-  }
-
-//+------------------------------------------------------------------+
-//| Fetch orders information                                         |
-//+------------------------------------------------------------------+
-void GetOrders(CJAVal &dataObject)
-  {
-   mControl.mResetLastError();
-
-   COrderInfo myorder;
-   CJAVal data, order;
-
-// Get orders
-   if(HistorySelect(0,TimeCurrent()))
-     {
-      int ordersTotal = OrdersTotal();
-      // Create empty array if no orders
-      if(!ordersTotal)
-        {
-         data["error"]=(bool) false;
-         data["orders"].Add(order);
-        }
-
-      for(int i=0; i<ordersTotal; i++)
-        {
-         if(myorder.Select(OrderGetTicket(i)))
-           {
-            order["id"]=(string) myorder.Ticket();
-            order["magic"]=OrderGetInteger(ORDER_MAGIC);
-            order["symbol"]=OrderGetString(ORDER_SYMBOL);
-            order["type"]=EnumToString(ENUM_ORDER_TYPE(OrderGetInteger(ORDER_TYPE)));
-            order["time_setup"]=OrderGetInteger(ORDER_TIME_SETUP);
-            order["open"]=OrderGetDouble(ORDER_PRICE_OPEN);
-            order["stoploss"]=OrderGetDouble(ORDER_SL);
-            order["takeprofit"]=OrderGetDouble(ORDER_TP);
-            order["volume"]=OrderGetDouble(ORDER_VOLUME_INITIAL);
-
-            data["error"]=(bool) false;
-            data["orders"].Add(order);
-           }
-         // Error handling
-         CheckError(__FUNCTION__);
-        }
-     }
-
-   string t=data.Serialize();
-   if(debug)
-      Print(t);
-   InformClientSocket(dataSocket,t);
-  }
-
-//+------------------------------------------------------------------+
-//| Trading module                                                   |
-//+------------------------------------------------------------------+
-void TradingModule(CJAVal &dataObject)
-  {
-   mControl.mResetLastError();
-   CTrade trade;
-
-   string   actionType = dataObject["actionType"].ToStr();
-   string   symbol=dataObject["symbol"].ToStr();
-   SymbolInfoString(symbol, SYMBOL_DESCRIPTION);
-   CheckError(__FUNCTION__);
-
-   int      idNimber=dataObject["id"].ToInt();
-   double   volume=dataObject["volume"].ToDbl();
-   double   SL=dataObject["stoploss"].ToDbl();
-   double   TP=dataObject["takeprofit"].ToDbl();
-   double   price=NormalizeDouble(dataObject["price"].ToDbl(),_Digits);
-   double   deviation=dataObject["deviation"].ToDbl();
-   string   comment=dataObject["comment"].ToStr();
-
-// Order expiration section
-   ENUM_ORDER_TYPE_TIME exp_type = ORDER_TIME_GTC;
-   datetime expiration = 0;
-   if(dataObject["expiration"].ToInt() != 0)
-     {
-      exp_type = ORDER_TIME_SPECIFIED;
-      expiration=dataObject["expiration"].ToInt();
-     }
-
-// Market orders
-   if(actionType=="ORDER_TYPE_BUY" || actionType=="ORDER_TYPE_SELL")
-     {
-      ENUM_ORDER_TYPE orderType=ORDER_TYPE_BUY;
-      price = SymbolInfoDouble(symbol,SYMBOL_ASK);
-      if(actionType=="ORDER_TYPE_SELL")
-        {
-         orderType=ORDER_TYPE_SELL;
-         price=SymbolInfoDouble(symbol,SYMBOL_BID);
-        }
-
-      if(trade.PositionOpen(symbol,orderType,volume,price,SL,TP,comment))
-        {
-         OrderDoneOrError(false, __FUNCTION__, trade);
-         return;
-        }
-     }
-
-// Pending orders
-   else
-      if(actionType=="ORDER_TYPE_BUY_LIMIT" || actionType=="ORDER_TYPE_SELL_LIMIT" || actionType=="ORDER_TYPE_BUY_STOP" || actionType=="ORDER_TYPE_SELL_STOP")
-        {
-         if(actionType=="ORDER_TYPE_BUY_LIMIT")
-           {
-            if(trade.BuyLimit(volume,price,symbol,SL,TP,ORDER_TIME_GTC,expiration,comment))
-              {
-               OrderDoneOrError(false, __FUNCTION__, trade);
-               return;
-              }
-           }
-         else
-            if(actionType=="ORDER_TYPE_SELL_LIMIT")
-              {
-               if(trade.SellLimit(volume,price,symbol,SL,TP,ORDER_TIME_GTC,expiration,comment))
-                 {
-                  OrderDoneOrError(false, __FUNCTION__, trade);
-                  return;
-                 }
-              }
-            else
-               if(actionType=="ORDER_TYPE_BUY_STOP")
-                 {
-                  if(trade.BuyStop(volume,price,symbol,SL,TP,ORDER_TIME_GTC,expiration,comment))
-                    {
-                     OrderDoneOrError(false, __FUNCTION__, trade);
-                     return;
-                    }
-                 }
-               else
-                  if(actionType=="ORDER_TYPE_SELL_STOP")
-                    {
-                     if(trade.SellStop(volume,price,symbol,SL,TP,ORDER_TIME_GTC,expiration,comment))
-                       {
-                        OrderDoneOrError(false, __FUNCTION__, trade);
-                        return;
-                       }
-                    }
-        }
-      // Position modify
-      else
-         if(actionType=="POSITION_MODIFY")
-           {
-            if(trade.PositionModify(idNimber,SL,TP))
-              {
-               OrderDoneOrError(false, __FUNCTION__, trade);
-               return;
-              }
-           }
-         // Position close partial
-         else
-            if(actionType=="POSITION_PARTIAL")
-              {
-               if(trade.PositionClosePartial(idNimber,volume))
-                 {
-                  OrderDoneOrError(false, __FUNCTION__, trade);
-                  return;
-                 }
-              }
-            // Position close by id
-            else
-               if(actionType=="POSITION_CLOSE_ID")
-                 {
-                  if(trade.PositionClose(idNimber))
-                    {
-                     OrderDoneOrError(false, __FUNCTION__, trade);
-                     return;
-                    }
-                 }
-               // Position close by symbol
-               else
-                  if(actionType=="POSITION_CLOSE_SYMBOL")
-                    {
-                     if(trade.PositionClose(symbol))
-                       {
-                        OrderDoneOrError(false, __FUNCTION__, trade);
-                        return;
-                       }
-                    }
-                  // Modify pending order
-                  else
-                     if(actionType=="ORDER_MODIFY")
-                       {
-                        if(trade.OrderModify(idNimber,price,SL,TP,ORDER_TIME_GTC,expiration))
-                          {
-                           OrderDoneOrError(false, __FUNCTION__, trade);
-                           return;
-                          }
-                       }
-                     // Cancel pending order
-                     else
-                        if(actionType=="ORDER_CANCEL")
-                          {
-                           if(trade.OrderDelete(idNimber))
-                             {
-                              OrderDoneOrError(false, __FUNCTION__, trade);
-                              return;
-                             }
-                          }
-                        // Action type dosen't exist
-                        else
-                          {
-                           mControl.mSetUserError(65538, GetErrorID(65538));
-                           CheckError(__FUNCTION__);
-                          }
-
-// This part of the code runs if order was not completed
-   OrderDoneOrError(true, __FUNCTION__, trade);
-  }
-
-//+------------------------------------------------------------------+
-//| TradeTransaction function                                        |
-//+------------------------------------------------------------------+
-void OnTradeTransaction(const MqlTradeTransaction &trans,
-                        const MqlTradeRequest &request,
-                        const MqlTradeResult &result)
-  {
-
-   ENUM_TRADE_TRANSACTION_TYPE  trans_type=trans.type;
-   switch(trans.type)
-     {
-      case  TRADE_TRANSACTION_REQUEST:
-        {
-         CJAVal data, req, res;
-
-         req["action"]=EnumToString(request.action);
-         req["order"]=(int) request.order;
-         req["symbol"]=(string) request.symbol;
-         req["volume"]=(double) request.volume;
-         req["price"]=(double) request.price;
-         req["stoplimit"]=(double) request.stoplimit;
-         req["sl"]=(double) request.sl;
-         req["tp"]=(double) request.tp;
-         req["deviation"]=(int) request.deviation;
-         req["type"]=EnumToString(request.type);
-         req["type_filling"]=EnumToString(request.type_filling);
-         req["type_time"]=EnumToString(request.type_time);
-         req["expiration"]=(int) request.expiration;
-         req["comment"]=(string) request.comment;
-         req["position"]=(int) request.position;
-         req["position_by"]=(int) request.position_by;
-
-         res["retcode"]=(int) result.retcode;
-         res["result"]=(string) GetRetcodeID(result.retcode);
-         res["deal"]=(int) result.order;
-         res["order"]=(int) result.order;
-         res["volume"]=(double) result.volume;
-         res["price"]=(double) result.price;
-         res["comment"]=(string) result.comment;
-         res["request_id"]=(int) result.request_id;
-         res["retcode_external"]=(int) result.retcode_external;
-
-         data["request"].Set(req);
-         data["result"].Set(res);
-
-         string t=data.Serialize();
-         if(debug)
-            Print(t);
-         InformClientSocket(streamSocket,t);
-        }
-      break;
-      default:
-        {} break;
-     }
   }
 
 //+------------------------------------------------------------------+
@@ -1738,8 +713,8 @@ void ResetSubscriptionsAndIndicators()
    ArrayFree(symbolSubscriptions);
    symbolSubscriptionCount=0;
 
-#ifdef START_INDICATOR
    bool error = false;
+#ifdef START_INDICATOR
    for(int i=0; i<indicatorCount; i++)
      {
       if(!IndicatorRelease(indicators[i].indicatorHandle))
@@ -1918,14 +893,6 @@ string GetErrorID(int error)
 
    switch(error)
      {
-      /*
-      case 0:     return("ERR_SUCCESS");                        break;
-      case 4301:  return("ERR_MARKET_UNKNOWN_SYMBOL");          break;
-      case 4303:  return("ERR_MARKET_WRONG_PROPERTY");          break;
-      case 4752:  return("ERR_TRADE_DISABLED");                 break;
-      case 4753:  return("ERR_TRADE_POSITION_NOT_FOUND");       break;
-      case 4754:  return("ERR_TRADE_ORDER_NOT_FOUND");          break;
-      */
       // Custom errors
       case 65537:
          return("ERR_DESERIALIZATION");
