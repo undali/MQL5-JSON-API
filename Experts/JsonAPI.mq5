@@ -290,6 +290,7 @@ void StreamPriceData()
    if(liveStream)
      {
       CJAVal last;
+      CJAVal acct;
       if(TerminalInfoInteger(TERMINAL_CONNECTED))
         {
          connectedFlag=true;
@@ -340,6 +341,7 @@ void StreamPriceData()
                      Data[6] = (int) spread[0];
                     }
                   last["status"] = (string) "CONNECTED";
+                  last["type"] = (string) "ASSET";
                   last["symbol"] = (string) symbol;
                   last["timeframe"] = (string) chartTF;
                   last["data"].Set(Data);
@@ -355,6 +357,22 @@ void StreamPriceData()
                   symbolSubscriptions[i].lastBar=thisBar;
               }
            }
+            
+         // Block to stream Account: balance, equity, free margin
+         if (symbolSubscriptionCount > 0) 
+            {
+               CJAVal Data;
+               Data[0] = (double) AccountInfoDouble(ACCOUNT_BALANCE);
+               Data[1] = (double) AccountInfoDouble(ACCOUNT_EQUITY);
+               Data[2] = (double) AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+               acct["status"] = (string) "CONNECTED";
+               acct["type"] = (string) "ACCOUNT";
+               acct["data"].Set(Data);
+               string t=acct.Serialize();
+               if(debug)
+                  Print(t);
+               InformClientSocket(liveSocket,t);
+            }
         }
       else
         {
@@ -527,6 +545,7 @@ void GetAccountInfo()
    info["margin"] = AccountInfoDouble(ACCOUNT_MARGIN);
    info["margin_free"] = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
    info["margin_level"] = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+   info["leverage"] = AccountInfoInteger(ACCOUNT_LEVERAGE);
 
    string t=info.Serialize();
    if(debug)
