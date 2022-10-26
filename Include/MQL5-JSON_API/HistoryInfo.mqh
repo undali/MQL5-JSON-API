@@ -246,13 +246,13 @@ void HistoryInfo(CJAVal &dataObject)
                      c[i][6]=(int) spread[i];
                     }
                   // Passing the current bar info
-                  c[barCount][0]=(long)   iTime(symbol,period,0);
-                  c[barCount][1]=(double) iOpen(symbol,period,0);
-                  c[barCount][2]=(double) iHigh(symbol,period,0);
-                  c[barCount][3]=(double) iLow(symbol,period,0);
-                  c[barCount][4]=(double) iClose(symbol,period,0);
-                  c[barCount][5]=(double) iVolume(symbol,period,0);
-                  c[barCount][6]=(int)    iSpread(symbol,period,0);
+                  // c[barCount][0]=(long)   iTime(symbol,period,0);
+                  // c[barCount][1]=(double) iOpen(symbol,period,0);
+                  // c[barCount][2]=(double) iHigh(symbol,period,0);
+                  // c[barCount][3]=(double) iLow(symbol,period,0);
+                  // c[barCount][4]=(double) iClose(symbol,period,0);
+                  // c[barCount][5]=(double) iVolume(symbol,period,0);
+                  // c[barCount][6]=(int)    iSpread(symbol,period,0);
                   d["data"].Set(c);
                  }
                else

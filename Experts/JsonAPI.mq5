@@ -61,6 +61,7 @@ bool liveStream = true;
 bool connectedFlag = true;
 int deInitReason = -1;
 double chartAttached = ChartID(); // Chart id where the expert is attached to
+CJAVal lastVol;
 
 // Variables for handling price data stream
 struct SymbolSubscription
@@ -329,6 +330,14 @@ void StreamPriceData()
                      Data[0] = (long)    tick.time_msc;
                      Data[1] = (double)  tick.bid;
                      Data[2] = (double)  tick.ask;
+
+                     double delta = (double) (iTickVolume(symbol,period,0) - lastVol[symbol].ToDbl());
+                     lastVol[symbol] = (double) iTickVolume(symbol,period,0);
+
+                     if (delta < 0)
+                        Data[3] = lastVol[symbol];
+                     else
+                        Data[3] = delta;
                     }
                   else
                     {
@@ -512,6 +521,7 @@ void ScriptConfiguration(CJAVal &dataObject)
 
    string symbol=dataObject["symbol"].ToStr();
    string chartTF=dataObject["chartTF"].ToStr();
+   lastVol[symbol] = (double) 0;
 
    ArrayResize(symbolSubscriptions, symbolSubscriptionCount+1);
    symbolSubscriptions[symbolSubscriptionCount].symbol = symbol;
