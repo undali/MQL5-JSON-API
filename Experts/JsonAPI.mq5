@@ -338,6 +338,7 @@ void StreamPriceData()
                         Data[3] = lastVol[symbol];
                      else
                         Data[3] = delta;
+                     Data[4] = iSpread(symbol,period,0);
                     }
                   else
                     {
@@ -556,6 +557,7 @@ void GetAccountInfo()
    info["margin_free"] = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
    info["margin_level"] = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
    info["leverage"] = AccountInfoInteger(ACCOUNT_LEVERAGE);
+   info["daylight_savings"] = TimeDaylightSavings() == 0;
 
    string t=info.Serialize();
    if(debug)
