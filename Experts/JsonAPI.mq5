@@ -14,7 +14,9 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
-//
+// 
+//+------------------------------------------------------------------+
+// Modified by Brian Branch <baebranch>
 //+------------------------------------------------------------------+
 
 // TODO: Deviation
@@ -61,6 +63,7 @@ bool liveStream = true;
 bool connectedFlag = true;
 int deInitReason = -1;
 double chartAttached = ChartID(); // Chart id where the expert is attached to
+CJAVal lastVol;
 
 // Variables for handling price data stream
 struct SymbolSubscription
@@ -290,6 +293,7 @@ void StreamPriceData()
    if(liveStream)
      {
       CJAVal last;
+      CJAVal acct;
       if(TerminalInfoInteger(TERMINAL_CONNECTED))
         {
          connectedFlag=true;
@@ -328,6 +332,15 @@ void StreamPriceData()
                      Data[0] = (long)    tick.time_msc;
                      Data[1] = (double)  tick.bid;
                      Data[2] = (double)  tick.ask;
+
+                     double delta = (double) (iTickVolume(symbol,period,0) - lastVol[symbol].ToDbl());
+                     lastVol[symbol] = (double) iTickVolume(symbol,period,0);
+
+                     if (delta < 0)
+                        Data[3] = lastVol[symbol];
+                     else
+                        Data[3] = delta;
+                     Data[4] = iSpread(symbol,period,0);
                     }
                   else
                     {
@@ -340,6 +353,7 @@ void StreamPriceData()
                      Data[6] = (int) spread[0];
                     }
                   last["status"] = (string) "CONNECTED";
+                  last["type"] = (string) "ASSET";
                   last["symbol"] = (string) symbol;
                   last["timeframe"] = (string) chartTF;
                   last["data"].Set(Data);
@@ -355,6 +369,22 @@ void StreamPriceData()
                   symbolSubscriptions[i].lastBar=thisBar;
               }
            }
+            
+         // Block to stream Account: balance, equity, free margin
+         if (symbolSubscriptionCount > 0) 
+            {
+               CJAVal Data;
+               Data[0] = (double) AccountInfoDouble(ACCOUNT_BALANCE);
+               Data[1] = (double) AccountInfoDouble(ACCOUNT_EQUITY);
+               Data[2] = (double) AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+               acct["status"] = (string) "CONNECTED";
+               acct["type"] = (string) "ACCOUNT";
+               acct["data"].Set(Data);
+               string t=acct.Serialize();
+               if(debug)
+                  Print(t);
+               InformClientSocket(liveSocket,t);
+            }
         }
       else
         {
@@ -494,6 +524,7 @@ void ScriptConfiguration(CJAVal &dataObject)
 
    string symbol=dataObject["symbol"].ToStr();
    string chartTF=dataObject["chartTF"].ToStr();
+   lastVol[symbol] = (double) 0;
 
    ArrayResize(symbolSubscriptions, symbolSubscriptionCount+1);
    symbolSubscriptions[symbolSubscriptionCount].symbol = symbol;
@@ -527,6 +558,8 @@ void GetAccountInfo()
    info["margin"] = AccountInfoDouble(ACCOUNT_MARGIN);
    info["margin_free"] = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
    info["margin_level"] = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+   info["leverage"] = AccountInfoInteger(ACCOUNT_LEVERAGE);
+   info["daylight_savings"] = TimeDaylightSavings() == 0;
 
    string t=info.Serialize();
    if(debug)
