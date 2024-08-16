@@ -74,6 +74,8 @@ struct SymbolSubscription
   };
 SymbolSubscription symbolSubscriptions[];
 int symbolSubscriptionCount = 0;
+int accountInfoStreamDelay = 0;
+ulong lastAccountInfoStreamed = GetTickCount64();
 
 // Error handling
 ControlErrors mControl;
@@ -371,8 +373,11 @@ void StreamPriceData()
            }
             
          // Block to stream Account: balance, equity, free margin
-         if (symbolSubscriptionCount > 0) 
-            {
+         if (accountInfoStreamDelay > 0)
+         {
+            ulong now = GetTickCount64();
+            ulong msPassed = now - lastAccountInfoStreamed;
+            if (msPassed > accountInfoStreamDelay) {
                CJAVal Data;
                Data[0] = (double) AccountInfoDouble(ACCOUNT_BALANCE);
                Data[1] = (double) AccountInfoDouble(ACCOUNT_EQUITY);
@@ -384,7 +389,9 @@ void StreamPriceData()
                if(debug)
                   Print(t);
                InformClientSocket(liveSocket,t);
+               lastAccountInfoStreamed = now;
             }
+         }
         }
       else
         {
@@ -508,13 +515,25 @@ void RequestHandler(ZmqMsg &request)
                                  ChartControl(incomingMessage);
                               else
 #endif
-                                {
-                                 mControl.mSetUserError(65538, GetErrorID(65538));
-                                 CheckError(__FUNCTION__);
-                                }
+      if(action=="STREAM_ACCOUNT_INFO")
+         StreamAccountInfo(incomingMessage);
+      else
+      {
+         mControl.mSetUserError(65538, GetErrorID(65538));
+         CheckError(__FUNCTION__);
+      }
 
 
   }
+
+void StreamAccountInfo(CJAVal &dataObject)
+{
+   accountInfoStreamDelay = dataObject["delay"].ToInt();
+
+   mControl.mResetLastError();
+   if(!CheckError(__FUNCTION__))
+      ActionDoneOrError(ERR_SUCCESS, __FUNCTION__, "ERR_SUCCESS");
+}
 
 //+------------------------------------------------------------------+
 //| Reconfigure the script params                                    |
@@ -745,6 +764,7 @@ void ResetSubscriptionsAndIndicators()
 
    ArrayFree(symbolSubscriptions);
    symbolSubscriptionCount=0;
+   accountInfoStreamDelay = 0;
 
    bool error = false;
 #ifdef START_INDICATOR

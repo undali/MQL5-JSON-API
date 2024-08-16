@@ -129,6 +129,7 @@ Check out the available combinations of `action` and `actionType`:
 | TRADE     | POSITION_CLOSE_SYMBOL | Positions close by symbol         |
 | TRADE     | ORDER_MODIFY          | Order modify                      |
 | TRADE     | ORDER_CANCEL          | Order cancel                      |
+| STREAM_ACCOUNT_INFO | null        | Set 'delay' param                 |
 
 Python 3 API class example:
 
