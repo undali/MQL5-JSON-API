@@ -26,7 +26,7 @@ void GetPositions(CJAVal &dataObject)
      {
       mControl.mResetLastError();
 
-      if(myposition.Select(PositionGetSymbol(i)))
+      if(myposition.SelectByIndex(i))
         {
          position["id"]=PositionGetInteger(POSITION_IDENTIFIER);
          position["magic"]=PositionGetInteger(POSITION_MAGIC);
@@ -37,6 +37,7 @@ void GetPositions(CJAVal &dataObject)
          position["stoploss"]=PositionGetDouble(POSITION_SL);
          position["takeprofit"]=PositionGetDouble(POSITION_TP);
          position["volume"]=PositionGetDouble(POSITION_VOLUME);
+         position["profit"]=PositionGetDouble(POSITION_PROFIT);
 
          data["error"]=(bool) false;
          data["positions"].Add(position);
